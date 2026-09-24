@@ -176,6 +176,11 @@ def render(points):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # US Treasury market: closed on Sat/Sun (Beijing). Skip to avoid flat weekend points.
+    if datetime.datetime.now().weekday() >= 5:
+        print("weekend, US treasury closed, skip sample")
+        return
+    # If a weekday-6am close capture ran, also allow runs through Monday early AM (US Sun close).
     fetched = fetch_now()
     points = load_data()
     sample = {"ts": now_str()}
