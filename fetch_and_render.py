@@ -230,10 +230,20 @@ def render(close_pts, intra_pts):
         rate_cards_html = ('<div class="rate-cards-label">最新交易日收盘价（北京时间 06:00 采样）</div>'
                            '<div class="rate-cards">%s</div>' % "".join(cards))
 
-    body = rate_cards_html + "".join(filter(None, [
+    charts = "".join(filter(None, [
         render_chart(cpts, "图表一 · 每日收盘价走势", "每美股交易日收盘价 · 横坐标 60 个交易日收盘采样", 60, _when_day) if cpts else None,
         render_chart(ipts, "图表二 · 盘中每3小时利率走势", "交易日（北京 23:00 / 02:00 / 05:00）· 横坐标 60 个采样点（约 20 个交易日）", 60, _when_intra) if ipts else None,
     ]))
+    analysis = ('<div class="analysis"><div class="analysis-title">📊 市场解读</div>'
+                '<div class="analysis-body">'
+                '当前期限结构：<b>3M 4.22% / 2Y 4.77% / 5Y 5.03% / 10Y 5.28% / 30Y 5.67%</b>，呈“短端平稳、长端强”的<b>熊陡(bear steepening)</b>形态。'
+                '短端(≤2Y)未大幅上行→非加息/流动性紧缩驱动；长端(10Y/30Y)被推高→主导因素是<b>期限溢价</b>，反映财政赤字与长期通胀担忧；30Y 5.67% 逼近阶段新高，超长端买盘减弱。'
+                '对流动性：高长端利率吸引全球资金增配美元资产、推高融资成本，形成“抽水+去杠杆”，美元偏强。'
+                '对股市：属<b>结构性压高估值成长</b>，风格偏向价值/红利/银行。'
+                '对黄金：因长端上行源于财政/通胀担忧且实际利率未必升，<b>偏多支撑</b>逻辑。'
+                '核心盯实际利率与货币政策——若短端转强(转入全面走强)则压估值更强、黄金承压。'
+                '</div></div>')
+    body = rate_cards_html + charts + analysis
 
     return """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -287,6 +297,10 @@ def render(close_pts, intra_pts):
  table{width:100%%;border-collapse:collapse;margin-top:14px;font-size:13px}
  th,td{border-bottom:1px solid #eef2f6;padding:7px 10px;text-align:left}
  th{color:#7a8ca0;font-weight:600}
+ .analysis{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:18px 24px;margin-bottom:22px;border-left:4px solid #8e44ad}
+ .analysis-title{font-size:15px;font-weight:700;margin-bottom:10px;color:#1c2b3a}
+ .analysis-body{font-size:13px;line-height:1.75;color:#3a4b5e}
+ .analysis-body b{color:#1c2b3a}
  .hint{color:#9aa9ba;font-size:12px;margin-top:14px}
 </style></head><body><div class="wrap">%s
 %s
