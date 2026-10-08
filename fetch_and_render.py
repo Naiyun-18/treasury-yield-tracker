@@ -22,12 +22,13 @@ INTRADAY = os.path.join(BASE, "intraday_data.json")
 HTML = os.path.join(BASE, "index.html")
 CLI = os.path.expanduser("~/.openclaw/workspace/skills/hithink-macro-query/scripts/cli.py")
 
-QUERIES = {"us5y": "美国5年期国债收益率",
+QUERIES = {"us2y": "美国2年期国债收益率",
+           "us5y": "美国5年期国债收益率",
            "us10y": "美国10年期国债收益率",
            "us30y": "美国30年期国债收益率"}
-KEYS = ["us5y", "us10y", "us30y"]
-LABELS = {"us5y": "5年期", "us10y": "10年期", "us30y": "30年期"}
-COLORS = {"us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b"}
+KEYS = ["us2y", "us5y", "us10y", "us30y"]
+LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "30年期"}
+COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b"}
 
 
 def _api_key():
@@ -186,9 +187,9 @@ def render_chart(points, title, subtitle, n_target, x_when):
     for p in reversed(points[-10:]):
         tds = "".join("<td>%s</td>" % (("%.3f" % p[k]) if p.get(k) is not None else "—") for k in KEYS)
         rows.append("<tr><td>%s</td>%s</tr>" % (p.get("ts", ""), tds))
-    table = ('<table><tr><th>采样时间(北京时间)</th><th>5年期(%%)</th>'
-             '<th>10年期(%%)</th><th>30年期(%%)</th></tr>%s</table>'
-             % "".join(rows))
+    th_cells = "".join("<th>%s(%%)</th>" % LABELS[k] for k in KEYS)
+    table = ('<table><tr><th>采样时间(北京时间)</th>%s</tr>%s</table>'
+             % (th_cells, "".join(rows)))
 
     return '<div class="chart-card">%s%s%s</div>' % (header, svg, table)
 
@@ -209,7 +210,7 @@ def render(close_pts, intra_pts):
         return "<html><body><h2>暂无数据</h2></body></html>"
 
     head = ("<h1>美国国债收益率追踪</h1>"
-            "<div class='sub'>5Y / 10Y / 30Y &nbsp;·&nbsp; "
+            "<div class='sub'>2Y / 5Y / 10Y / 30Y &nbsp;·&nbsp; "
             "图表一：每美股交易日收盘价 &nbsp;·&nbsp; "
             "图表二：盘中每3小时采样（北京 23:00/02:00/05:00）</div>")
 
