@@ -19,10 +19,12 @@
  .zoom-overlay{position:fixed;inset:0;background:rgba(10,18,30,.88);z-index:999;display:none;align-items:center;justify-content:center;padding:8px}
  .zoom-overlay.open{display:flex}
  .zoom-box{background:#fff;border-radius:14px;padding:22px;width:min(1500px,100vw);max-height:calc(100vh - 16px);box-sizing:border-box;overflow:auto;position:relative;box-shadow:0 8px 40px rgba(0,0,0,.4);display:flex;flex-direction:column}
+ #zoomBox:fullscreen{width:100vw;height:100dvh;padding:0;background:#0a121e;display:flex}
+ #zoomBox:-webkit-full-screen{width:100vw;height:100dvh;padding:0;background:#0a121e;display:flex}
  .zoom-box svg{width:100%;height:auto;margin:auto}
  .zoom-close{position:sticky;top:0;align-self:flex-end;cursor:pointer;font-size:20px;line-height:1;color:#fff;background:#c0392b;border:none;border-radius:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:none;margin:-6px -6px 6px 6px;z-index:10}
  .zoom-title{font-size:16px;font-weight:700;margin:0 0 12px;padding-right:44px}
- @media(max-width:768px){
+ @media(max-width:768px),(max-height:600px) and (orientation:landscape){
    body{padding:8px}
    .sub{font-size:12px;line-height:1.6;margin-bottom:12px}
    h1{font-size:19px}
@@ -36,8 +38,8 @@
    th,td{padding:6px 6px}
    .zoom-overlay{padding:0}
    .zoom-box{width:100vw;height:100dvh;max-height:100dvh;border-radius:0;padding:10px;display:block;overflow:auto;-webkit-overflow-scrolling:touch}
-   .zoom-box #zoomContent{width:max-content;min-width:100vw}
-   .zoom-box svg{height:calc(100dvh - 120px);width:auto;max-width:none;margin:0;display:block}
+   .zoom-box #zoomContent{width:max-content;min-width:100%;margin:0 auto;box-sizing:border-box;text-align:center}
+   .zoom-box svg{height:calc(100dvh - 120px);width:auto;max-width:none;margin:0 auto;display:block}
    .zoom-close{position:static;float:right;margin:0 0 8px 8px}
    .zoom-title{font-size:15px;clear:both}
  }
@@ -67,8 +69,32 @@ function openZoom(el){
   document.getElementById('zoomContent').innerHTML=svg.outerHTML.replace(/ on[a-z]+="[^"]*"/gi,'');
   document.getElementById('zoomBox').classList.add('open');
 }
-function closeZoom(){document.getElementById('zoomBox').classList.remove('open');}
+function closeZoom(){
+  var b=document.getElementById('zoomBox');
+  b.classList.remove('open');
+  if(document.fullscreenElement||document.webkitFullscreenElement){
+    try{(document.exitFullscreen||document.webkitExitFullscreen).call(document);}catch(e){}
+  }
+}
+function requestFs(el){
+  try{if(el.requestFullscreen){return el.requestFullscreen();}
+      if(el.webkitRequestFullscreen){return el.webkitRequestFullscreen();}}
+  catch(e){}
+  return Promise.reject();
+}
+function openZoom(el){
+  var svg=el.querySelector('.zoomable');
+  if(!svg)return;
+  document.getElementById('zoomTitle').textContent=el.querySelector('.chart-title').textContent;
+  document.getElementById('zoomContent').innerHTML=svg.outerHTML.replace(/ on[a-z]+="[^"]*"/gi,'');
+  var b=document.getElementById('zoomBox');
+  b.classList.add('open');
+  var isMobile=window.matchMedia&&window.matchMedia('(max-width:768px),(max-height:600px) and (orientation:landscape)').matches;
+  if(isMobile){requestFs(b).catch(function(){});}
+}
 document.getElementById('zoomBox').addEventListener('click',function(e){if(e.target===this)closeZoom();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeZoom();});
+document.addEventListener('fullscreenchange',function(){if(!document.fullscreenElement)document.getElementById('zoomBox').classList.remove('open');});
+document.addEventListener('webkitfullscreenchange',function(){if(!document.webkitFullscreenElement)document.getElementById('zoomBox').classList.remove('open');});
 </script>
 </div></body></html>
