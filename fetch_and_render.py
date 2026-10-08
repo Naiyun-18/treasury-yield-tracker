@@ -243,7 +243,7 @@ def render(close_pts, intra_pts):
                 '对黄金：因长端上行源于财政/通胀担忧且实际利率未必升，<b>偏多支撑</b>逻辑。'
                 '核心盯实际利率与货币政策——若短端转强(转入全面走强)则压估值更强、黄金承压。'
                 '</div></div>')
-    body = rate_cards_html + charts + analysis
+    body = analysis + rate_cards_html + charts
 
     return """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -297,9 +297,9 @@ def render(close_pts, intra_pts):
  table{width:100%%;border-collapse:collapse;margin-top:14px;font-size:13px}
  th,td{border-bottom:1px solid #eef2f6;padding:7px 10px;text-align:left}
  th{color:#7a8ca0;font-weight:600}
- .analysis{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:18px 24px;margin-bottom:22px;border-left:4px solid #8e44ad}
- .analysis-title{font-size:15px;font-weight:700;margin-bottom:10px;color:#1c2b3a}
- .analysis-body{font-size:13px;line-height:1.75;color:#3a4b5e}
+ .analysis{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:20px 26px;margin-bottom:20px;border-left:4px solid #8e44ad}
+ .analysis-title{font-size:19px;font-weight:700;margin-bottom:12px;color:#1c2b3a}
+ .analysis-body{font-size:16px;line-height:1.9;color:#2c3e50}
  .analysis-body b{color:#1c2b3a}
  .hint{color:#9aa9ba;font-size:12px;margin-top:14px}
 </style></head><body><div class="wrap">%s
