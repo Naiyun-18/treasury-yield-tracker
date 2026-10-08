@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-US Treasury yield tracker - fetch 5Y/10Y/30Y + render self-contained HTML chart.
-Data source: 同花顺问财 (hithink-macro-query). Append each sample to data.json,
-then render a standalone index.html with 3-line SVG chart (no CDN dependency).
+US Treasury yield tracker - fetch 5Y/10Y/30Y + render self-contained HTML with TWO charts.
+
+Data source: 同花顺问财 (hithink-macro-query). Append each sample to the correct data file,
+then render a standalone index.html with two 3-line SVG charts (no CDN dependency).
+
+  Chart 1 (日线收盘) : 每美股交易日收盘价, 1 sample per US trading day. X轴固定最多 60 个采样点 (=60个交易日).
+  Chart 2 (盘中3小时) : 每交易日 3 次 (北京 23:00 / 02:00 / 05:00), 30 samples per ~20 trading days X轴固定最多 60 个采样点.
+                       开盘(20:00)不采集利率数据.
+
+Data files (both gitignored):
+  close_data.json      - daily close samples  {ts, us5y, us10y, us30y}
+  intraday_data.json   - intraday samples     {ts, us5y, us10y, us30y}
 """
 import os, json, sys, subprocess, datetime
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(BASE, "data.json")
+CLOSE = os.path.join(BASE, "close_data.json")
+INTRADAY = os.path.join(BASE, "intraday_data.json")
 HTML = os.path.join(BASE, "index.html")
 CLI = os.path.expanduser("~/.openclaw/workspace/skills/hithink-macro-query/scripts/cli.py")
 
@@ -52,30 +62,65 @@ def fetch_now():
     return out
 
 
-def load_data():
-    if os.path.exists(DATA):
+def load_data(path):
+    if os.path.exists(path):
         try:
-            with open(DATA, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return []
     return []
 
 
-def save_data(data):
-    with open(DATA, "w", encoding="utf-8") as f:
+def save_data(path, data):
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
-    print("saved %d samples -> %s" % (len(data), DATA))
+    print("saved %d samples -> %s" % (len(data), path))
 
 
 def now_str():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def render(points):
-    if not points:
-        return "<html><body><h2>暂无数据</h2></body></html>"
-    xs = list(range(len(points)))  # equal-spaced by sample index
+def sample_kind(now):
+    """Map a Beijing capture time -> data kind.
+
+    Returns 'close' | 'intraday' | None(skip).
+    US non-trading in Beijing time:
+      - Beijing Sunday 所有时段           = US 周六
+      - 北京周一 02/05/06 点              = US 周日(休市)
+      - 北京周六 23:00                    = US 周六
+      - 北京 20:00                        = 开盘(不采集利率)
+    美债休市判断简表：
+      23:00 — 周一~周五有效
+      02/05/06 — 周二~周六有效
+      20:00 — 开盘，跳过不采集
+    """
+    h = now.hour
+    wd = now.weekday()  # Mon=0 ... Sun=6
+
+    if h == 20:                 # 开盘，不采集利率数据
+        return None
+    if wd == 6:                 # 北京周日 = US 周六
+        return None
+    # 北京周一 02/05/06 = US 周日(休市)；周一 23:00 = US 周一(有效)
+    if wd == 0 and h in (2, 5, 6):
+        return None
+    # 北京周六 23:00 = US 周六(休市)；周六 02/05 = US 周五(有效)
+    if wd == 5 and h == 23:
+        return None
+    if h == 23:
+        return "intraday"
+    if h in (2, 5):
+        return "intraday"
+    if h == 6:
+        return "close"
+    return None
+
+
+def render_chart(points, title, subtitle, n_target, x_when):
+    """Render one 3-line SVG chart as an HTML string."""
+    xs = list(range(len(points)))
     all_vals = [p[k] for p in points for k in KEYS if p.get(k) is not None]
     lo, hi = min(all_vals), max(all_vals)
     pad = max((hi - lo) * 0.12, 0.05)
@@ -97,7 +142,6 @@ def render(points):
                 pts.append((px(i), py(p[k])))
         return pts
 
-    # y grid + labels
     grid = []
     for g in range(6):
         v = ylo + (yhi - ylo) * g / 5
@@ -105,23 +149,22 @@ def render(points):
         grid.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#e8e8e8"/>'
                     % (L, gy, W - R, gy))
         grid.append('<text x="%d" y="%.1f" class="ylab">%.3f</text>' % (L - 8, gy + 4, v))
-    # x labels (first/mid/last)
+
     xlab = []
-    for name, idx in (("首", 0), ("中", len(points) // 2), ("末", len(points) - 1)):
-        xlab.append('<text x="%.1f" y="%d" class="xlab">%s</text>'
-                    % (px(idx), H - B + 30, points[idx].get("ts", "")))
-    xlab.append('<text x="%d" y="%d" class="xlab" text-anchor="start">%d 个采样点</text>'
-                % (L, H - B + 45, len(points)))
+    for idx in (0, len(points) // 2, len(points) - 1):
+        lab = x_when(points[idx]["ts"])
+        xlab.append('<text x="%.1f" y="%d" class="xlab">%s</text>' % (px(idx), H - B + 20, lab))
+    xlab.append('<text x="%d" y="%d" class="xlab" text-anchor="start">%d / %d 采样点</text>'
+                % (L, H - B + 40, len(points), n_target))
 
     polylines = []
     for k in KEYS:
         pts = line_pts(k)
         if not pts:
             continue
-        d = "M" + " L".join("%.1f,%.1f" % (x, y) for x, y in pts)
         polylines.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="2.5"/>'
                          % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[k]))
-    # end-point dots
+
     dots = []
     for k in KEYS:
         pts = line_pts(k)
@@ -129,7 +172,6 @@ def render(points):
             x, y = pts[-1]
             dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[k]))
 
-    # legend
     lx = L
     legs = []
     for k in KEYS:
@@ -143,60 +185,112 @@ def render(points):
                     % (lx, COLORS[k], lx + 22, LABELS[k], last or 0))
         lx += 150
 
-    head = ("<h1>美国国债收益率追踪</h1>"
-            "<div class='sub'>5Y / 10Y / 30Y &nbsp;·&nbsp; 最新采样：%s &nbsp;·&nbsp; 交易时段每3小时 &amp; 收盘后自动更新</div>"
-            % (points[-1].get("ts", "")))
+    header = ('<div class="chart-title">%s</div>'
+              '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>' % (title, subtitle, points[-1].get("ts", "")))
+    svg = '<svg viewBox="0 0 %d %d">%s%s%s%s</svg>' % (
+        W, H, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots))
 
     rows = []
-    for p in reversed(points[-20:]):
+    for p in reversed(points[-10:]):
         tds = "".join("<td>%s</td>" % (("%.3f" % p[k]) if p.get(k) is not None else "—") for k in KEYS)
         rows.append("<tr><td>%s</td>%s</tr>" % (p.get("ts", ""), tds))
+    table = ('<table><tr><th>采样时间(北京时间)</th><th>5年期(%%)</th>'
+             '<th>10年期(%%)</th><th>30年期(%%)</th></tr>%s</table>'
+             % "".join(rows))
+
+    return ('<div class="chart-card">%s%s<div class="legendbox">%s</div>%s</div>'
+            % (header, svg, "".join(legs), table))
+
+
+def _when_day(ts):
+    return ts[:10]
+
+
+def _when_intra(ts):
+    # "2026-09-25 05:00:00" -> "09-25 05:00"
+    return "%s %s" % (ts[5:10], ts[11:16])
+
+
+def render(close_pts, intra_pts):
+    cpts = close_pts[-60:]
+    ipts = intra_pts[-60:]
+    if not cpts and not ipts:
+        return "<html><body><h2>暂无数据</h2></body></html>"
+
+    head = ("<h1>美国国债收益率追踪</h1>"
+            "<div class='sub'>5Y / 10Y / 30Y &nbsp;·&nbsp; "
+            "图表一：每美股交易日收盘价（最近 %d/60 个交易日）&nbsp;·&nbsp; "
+            "图表二：盘中每3小时采样（北京 23:00/02:00/05:00，开盘不采集，最近 %d/60 个采样点）</div>"
+            % (len(cpts), len(ipts)))
+
+    body = "".join(filter(None, [
+        render_chart(cpts, "图表一 · 每日收盘价走势", "每美股交易日收盘价 · 横坐标 60 个交易日收盘采样", 60, _when_day) if cpts else None,
+        render_chart(ipts, "图表二 · 盘中每3小时利率走势", "交易日（北京 23:00 / 02:00 / 05:00）· 横坐标 60 个采样点（约 20 个交易日）", 60, _when_intra) if ipts else None,
+    ]))
 
     return """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>美国国债收益率追踪</title>
 <style>
  body{font-family:-apple-system,'Segoe UI','PingFang SC',Microsoft YaHei,sans-serif;background:#f4f7fb;color:#1c2b3a;margin:0;padding:24px}
- .card{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:22px 26px;max-width:1240px;margin:0 auto;}
- h1{font-size:22px;margin:0 0 4px}.sub{color:#7a8ca0;font-size:13px;margin-bottom:14px}
+ .wrap{max-width:1280px;margin:0 auto}
+ h1{font-size:22px;margin:0 0 4px}.sub{color:#7a8ca0;font-size:13px;margin-bottom:18px}
+ .chart-card{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:22px 26px;margin-bottom:22px}
+ .chart-title{font-size:16px;font-weight:700;margin-bottom:2px}
+ .chart-sub{color:#7a8ca0;font-size:12px;margin-bottom:10px}
  svg{width:100%%;height:auto;display:block}
  .ylab{font-size:11px;fill:#7a8ca0}.xlab{font-size:10px;fill:#7a8ca0;text-anchor:middle}
+ .legendbox{padding-top:4px}
  .leg{font-size:13px;fill:#1c2b3a}
- table{width:100%%;border-collapse:collapse;margin-top:18px;font-size:13px}
+ table{width:100%%;border-collapse:collapse;margin-top:14px;font-size:13px}
  th,td{border-bottom:1px solid #eef2f6;padding:7px 10px;text-align:left}
- th{color:#7a8ca0;font-weight:600}.last td{font-weight:700;background:#f7fafd}
+ th{color:#7a8ca0;font-weight:600}
  .hint{color:#9aa9ba;font-size:12px;margin-top:14px}
-</style></head><body><div class="card">
-%s<svg viewBox="0 0 %d %d">%s%s%s%s</svg>
-<table><tr><th>采样时间(北京时间)</th><th>5年期(%%</th><th>10年期(%%</th><th>30年期(%%</th></tr>%s</table>
-</div><div class="hint">数据来源：同花顺问财；盘中免费源受限，同一交易日内每3小时采样值可能保持不变，每日收盘后更新推进曲线。</div>
-</body></html>""" % (
-        head, W, H, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots), "".join(rows))
+</style></head><body><div class="wrap">%s
+%s
+<div class="hint">数据来源：同花顺问财；盘中免费源受限，同一交易日内每3小时采样值可能保持不变，每日收盘后更新推进曲线。图表一取每交易日 06:00(北京) 最近的收盘采样，图表二只取 23:00/02:00/05:00 采样（开盘 20:00 不采集）。</div>
+</div></body></html>""" % (head, body)
 
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    # US Treasury market: closed on Sat/Sun (Beijing). Skip to avoid flat weekend points.
-    if datetime.datetime.now().weekday() >= 5:
-        print("weekend, US treasury closed, skip sample")
+    now = datetime.datetime.now()
+    kind = sample_kind(now)
+
+    if kind is None:
+        print("当前时刻非美债盘中/收盘采集点（休市或开盘不采集），跳过抓取，仅渲染页面")
+        close = load_data(CLOSE)
+        intra = load_data(INTRADAY)
+        with open(HTML, "w", encoding="utf-8") as f:
+            f.write(render(close, intra))
+        print("rendered(existing) -> %s | close=%d intraday=%d" % (HTML, len(close), len(intra)))
         return
-    # If a weekday-6am close capture ran, also allow runs through Monday early AM (US Sun close).
+
     fetched = fetch_now()
-    points = load_data()
+    if not any(v is not None for v in fetched.values()):
+        print("抓取失败，无有效数据，跳过")
+        return
+
     sample = {"ts": now_str()}
     for k, v in fetched.items():
         if v is not None:
             sample[k] = v
-    # avoid duplicate identical timestamps (same minute repeat run)
+
+    path = CLOSE if kind == "close" else INTRADAY
+    points = load_data(path)
     if points and points[-1].get("ts") == sample["ts"]:
         print("same minute, skip append")
     else:
         points.append(sample)
-    save_data(points)
+    save_data(path, points)
+
+    close = load_data(CLOSE)
+    intra = load_data(INTRADAY)
     with open(HTML, "w", encoding="utf-8") as f:
-        f.write(render(points))
-    print("rendered -> %s | latest: 5Y=%.3f 10Y=%.3f 30Y=%.3f"
-          % (HTML, sample.get("us5y", 0), sample.get("us10y", 0), sample.get("us30y", 0)))
+        f.write(render(close, intra))
+    print("rendered -> %s | close=%d intraday=%d | kind=%s latest 5Y=%.3f 10Y=%.3f 30Y=%.3f"
+          % (HTML, len(close), len(intra), kind,
+             sample.get("us5y", 0), sample.get("us10y", 0), sample.get("us30y", 0)))
 
 
 if __name__ == "__main__":
