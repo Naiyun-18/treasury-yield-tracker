@@ -29,6 +29,10 @@ QUERIES = {"us2y": "美国2年期国债收益率",
 KEYS = ["us2y", "us5y", "us10y", "us30y"]
 LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "30年期"}
 COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b"}
+LINKS = {"us2y": "https://finance.baidu.com/bond/global-US2YT",
+         "us5y": "https://finance.baidu.com/bond/global-US5YT",
+         "us10y": "https://finance.baidu.com/bond/global-US10YT",
+         "us30y": "https://finance.baidu.com/bond/global-US30YT"}
 
 
 def _api_key():
@@ -226,7 +230,9 @@ def render(close_pts, intra_pts):
             cards.append(
                 '<div class="rate-card" style="border-left-color:%s">'
                 '<div class="rate-head"><span class="rate-ico" style="background:%s"></span>%s</div>'
-                '<div class="rate-val" style="color:%s">%s</div></div>' % (c, c, LABELS[k], c, txt))
+                '<div class="rate-val" style="color:%s">%s</div>'
+                '<a class="rate-link" href="%s" target="_blank" rel="noopener">行情详情 &nbsp;↗</a>'
+                '</div>' % (c, c, LABELS[k], c, txt, LINKS[k]))
         rate_cards_html = ('<div class="rate-cards-label">最新交易日收盘价（北京时间 06:00 采样）</div>'
                            '<div class="rate-cards">%s</div>' % "".join(cards))
 
@@ -236,12 +242,12 @@ def render(close_pts, intra_pts):
     ]))
     analysis = ('<div class="analysis"><div class="analysis-title">📊 市场解读</div>'
                 '<div class="analysis-body">'
-                '当前期限结构：<b>3M 4.22% / 2Y 4.77% / 5Y 5.03% / 10Y 5.28% / 30Y 5.67%</b>，呈“短端平稳、长端强”的<b>熊陡(bear steepening)</b>形态。'
-                '短端(≤2Y)未大幅上行→非加息/流动性紧缩驱动；长端(10Y/30Y)被推高→主导因素是<b>期限溢价</b>，反映财政赤字与长期通胀担忧；30Y 5.67% 逼近阶段新高，超长端买盘减弱。'
-                '对流动性：高长端利率吸引全球资金增配美元资产、推高融资成本，形成“抽水+去杠杆”，美元偏强。'
-                '对股市：属<b>结构性压高估值成长</b>，风格偏向价值/红利/银行。'
-                '对黄金：因长端上行源于财政/通胀担忧且实际利率未必升，<b>偏多支撑</b>逻辑。'
-                '核心盯实际利率与货币政策——若短端转强(转入全面走强)则压估值更强、黄金承压。'
+                '<p><b>📌 当前期限结构：</b>3M 4.22% / 2Y 4.77% / 5Y 5.03% / 10Y 5.28% / 30Y 5.67%，呈“短端平稳、长端强”的<b>熊陡(bear steepening)</b>形态。</p>'
+                '<p><b>🔍 驱动因素：</b>短端(≤2Y)未大幅上行→非加息/流动性紧缩驱动；长端(10Y/30Y)被推高→主导因素是<b>期限溢价</b>，反映财政赤字与长期通胀担忧；30Y 5.67% 逼近阶段新高，超长端买盘减弱。</p>'
+                '<p><b>💧 对流动性：</b>高长端利率吸引全球资金增配美元资产、推高融资成本，形成“抽水+去杠杆”，美元偏强。</p>'
+                '<p><b>📈 对股市：</b>属<b>结构性压高估值成长</b>，风格偏向价值/红利/银行。</p>'
+                '<p><b>🥇 对黄金：</b>因长端上行源于财政/通胀担忧、实际利率未必升，<b>偏多支撑</b>逻辑。</p>'
+                '<p><b>⚠️ 关注点：</b>核心盯实际利率与货币政策——若短端转强(转入全面走强)则压估值更强、黄金承压。</p>'
                 '</div></div>')
     body = analysis + rate_cards_html + charts
 
@@ -300,7 +306,10 @@ def render(close_pts, intra_pts):
  .analysis{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:20px 26px;margin-bottom:20px;border-left:4px solid #8e44ad}
  .analysis-title{font-size:19px;font-weight:700;margin-bottom:12px;color:#1c2b3a}
  .analysis-body{font-size:16px;line-height:1.9;color:#2c3e50}
+ .analysis-body p{margin:10px 0}
  .analysis-body b{color:#1c2b3a}
+ .rate-link{display:inline-block;margin-top:10px;font-size:13px;color:#2b6cb0;text-decoration:none;border-bottom:1px dashed #a8c6ef;cursor:pointer}
+ .rate-link:hover{color:#1a4f8a}
  .hint{color:#9aa9ba;font-size:12px;margin-top:14px}
 </style></head><body><div class="wrap">%s
 %s
