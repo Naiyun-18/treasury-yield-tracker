@@ -179,7 +179,8 @@ def render_chart(points, title, subtitle, n_target, x_when):
     header = ('<div class="chart-title">%s</div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>' % (title, subtitle, points[-1].get("ts", "")))
     svg = ('<svg viewBox="0 0 %d %d" class="zoomable" onclick="openZoom(this.closest(\'.chart-card\'))">'
-           '%s%s%s%s</svg>' % (W, H, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots)))
+           '<rect x="0" y="0" width="%d" height="%d" fill="#ffffff"/>'
+           '%s%s%s%s</svg>' % (W, H, W, H, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots)))
 
     rows = []
     for p in reversed(points[-10:]):
