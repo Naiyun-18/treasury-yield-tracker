@@ -229,7 +229,23 @@ def render(close_pts, intra_pts):
             "图表二：盘中每3小时采样（北京 23:00/02:00/05:00，开盘不采集，最近 %d/60 个采样点）</div>"
             % (len(cpts), len(ipts)))
 
-    body = "".join(filter(None, [
+    # 顶部最新收盘价卡片（附图卡片风格）
+    rate_cards_html = ""
+    if cpts:
+        latest = cpts[-1]
+        cards = []
+        for k in KEYS:
+            v = latest.get(k)
+            txt = ("%.3f%%" % v) if v is not None else "—"
+            c = COLORS[k]
+            cards.append(
+                '<div class="rate-card" style="border-left-color:%s">'
+                '<div class="rate-head"><span class="rate-ico" style="background:%s"></span>%s</div>'
+                '<div class="rate-val" style="color:%s">%s</div></div>' % (c, c, LABELS[k], c, txt))
+        rate_cards_html = ('<div class="rate-cards-label">最新交易日收盘价（北京时间 06:00 采样）</div>'
+                           '<div class="rate-cards">%s</div>' % "".join(cards))
+
+    body = rate_cards_html + "".join(filter(None, [
         render_chart(cpts, "图表一 · 每日收盘价走势", "每美股交易日收盘价 · 横坐标 60 个交易日收盘采样", 60, _when_day) if cpts else None,
         render_chart(ipts, "图表二 · 盘中每3小时利率走势", "交易日（北京 23:00 / 02:00 / 05:00）· 横坐标 60 个采样点（约 20 个交易日）", 60, _when_intra) if ipts else None,
     ]))
@@ -244,6 +260,13 @@ def render(close_pts, intra_pts):
  .chart-card{background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:22px 26px;margin-bottom:22px}
  .chart-title{font-size:16px;font-weight:700;margin-bottom:2px}
  .chart-sub{color:#7a8ca0;font-size:12px;margin-bottom:10px}
+ .rate-cards-label{color:#7a8ca0;font-size:12px;margin:0 2px 8px}
+ .rate-cards{display:flex;gap:14px;margin-bottom:20px}
+ .rate-card{flex:1;background:#fff;border-radius:10px;box-shadow:0 1px 6px rgba(20,40,80,.08);padding:16px 20px;border-left:4px solid #eef2f6}
+ .rate-head{display:flex;align-items:center;gap:8px;font-size:13px;color:#7a8ca0;font-weight:600}
+ .rate-ico{width:20px;height:20px;border-radius:6px;display:inline-block}
+ .rate-val{font-size:34px;font-weight:800;margin-top:10px;line-height:1.1;letter-spacing:.5px}
+ .rate-val b{font-size:14px;font-weight:600;margin-left:2px}
  svg{width:100%%;height:auto;display:block}
  .ylab{font-size:11px;fill:#7a8ca0}.xlab{font-size:10px;fill:#7a8ca0;text-anchor:middle}
  .legendbox{padding-top:4px}
