@@ -176,10 +176,11 @@ def render_chart(points, title, subtitle, n_target, x_when):
             x, y = pts[-1]
             dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[k]))
 
-    header = ('<div class="chart-title">%s</div>'
+    header = ('<div class="chart-top"><div class="chart-title">%s</div>'
+              '<span class="zoom-btn" onclick="openZoom(this.closest(\'.chart-card\'))">&#9210; 放大</span></div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>' % (title, subtitle, points[-1].get("ts", "")))
-    svg = '<svg viewBox="0 0 %d %d">%s%s%s%s</svg>' % (
-        W, H, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots))
+    svg = ('<svg viewBox="0 0 %d %d" class="zoomable" onclick="openZoom(this.closest(\'.chart-card\'))">'
+           '%s%s%s%s</svg>' % (W, H, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots)))
 
     rows = []
     for p in reversed(points[-10:]):
@@ -193,7 +194,7 @@ def render_chart(points, title, subtitle, n_target, x_when):
 
 
 def _when_day(ts):
-    return ts[:10]
+    return ts[5:10]  # YYYY-MM-DD -> MM-DD
 
 
 def _when_intra(ts):
@@ -250,6 +251,16 @@ def render(close_pts, intra_pts):
  .rate-ico{width:20px;height:20px;border-radius:6px;display:inline-block}
  .rate-val{font-size:34px;font-weight:800;margin-top:10px;line-height:1.1;letter-spacing:.5px}
  .rate-val b{font-size:14px;font-weight:600;margin-left:2px}
+ .chart-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+ .zoom-btn{cursor:pointer;font-size:12px;color:#4a6b8a;background:#eef4fa;border:1px solid #d6e3f0;border-radius:8px;padding:5px 11px;white-space:nowrap;flex:none}
+ .zoom-btn:hover{background:#dfeaf6}
+ .zoomable{cursor:zoom-in}
+ .zoom-overlay{position:fixed;inset:0;background:rgba(13,24,40,.82);z-index:999;display:none;align-items:center;justify-content:center;padding:14px}
+ .zoom-overlay.open{display:flex}
+ .zoom-box{background:#fff;border-radius:12px;padding:22px;max-width:97vw;max-height:94vh;overflow:auto;position:relative;box-shadow:0 8px 40px rgba(0,0,0,.35)}
+ .zoom-box svg{width:min(1200px,96vw);height:auto}
+ .zoom-close{position:sticky;top:0;float:right;cursor:pointer;font-size:20px;line-height:1;color:#fff;background:#c0392b;border:none;border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;margin-left:8px;z-index:10}
+ .zoom-title{font-size:16px;font-weight:700;margin-bottom:12px;padding-right:44px}
  svg{width:100%%;height:auto;display:block}
  .ylab{font-size:11px;fill:#7a8ca0}.xlab{font-size:10px;fill:#7a8ca0;text-anchor:middle}
  .legendbox{padding-top:4px}
@@ -261,6 +272,25 @@ def render(close_pts, intra_pts):
 </style></head><body><div class="wrap">%s
 %s
 <div class="hint">数据来源：同花顺问财；盘中免费源受限，同一交易日内每3小时采样值可能保持不变。</div>
+<div id="zoomBox" class="zoom-overlay">
+  <div class="zoom-box">
+    <button class="zoom-close" onclick="closeZoom()" aria-label="关闭">&#10005;</button>
+    <div id="zoomTitle" class="zoom-title"></div>
+    <div id="zoomContent"></div>
+  </div>
+</div>
+<script>
+function openZoom(el){
+  var svg=el.querySelector('.zoomable');
+  if(!svg)return;
+  document.getElementById('zoomTitle').textContent=el.querySelector('.chart-title').textContent;
+  document.getElementById('zoomContent').innerHTML=svg.outerHTML.replace(/ on[a-z]+="[^"]*"/gi,'');
+  document.getElementById('zoomBox').classList.add('open');
+}
+function closeZoom(){document.getElementById('zoomBox').classList.remove('open');}
+document.getElementById('zoomBox').addEventListener('click',function(e){if(e.target===this)closeZoom();});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeZoom();});
+</script>
 </div></body></html>""" % (head, body)
 
 
