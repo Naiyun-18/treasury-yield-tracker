@@ -160,8 +160,6 @@ def render_chart(points, title, subtitle, n_target, x_when):
     for idx in (0, len(points) // 2, len(points) - 1):
         lab = x_when(points[idx]["ts"])
         xlab.append('<text x="%.1f" y="%d" class="xlab">%s</text>' % (px(idx), H - B + 20, lab))
-    xlab.append('<text x="%d" y="%d" class="xlab" text-anchor="start">%d / %d 采样点</text>'
-                % (L, H - B + 40, len(points), n_target))
 
     polylines = []
     for k in KEYS:
@@ -178,19 +176,6 @@ def render_chart(points, title, subtitle, n_target, x_when):
             x, y = pts[-1]
             dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[k]))
 
-    lx = L
-    legs = []
-    for k in KEYS:
-        last = None
-        for p in reversed(points):
-            if p.get(k) is not None:
-                last = p[k]
-                break
-        legs.append('<rect x="%d" y="12" width="18" height="4" fill="%s"/>'
-                    '<text x="%d" y="18" class="leg">%s %.3f%%</text>'
-                    % (lx, COLORS[k], lx + 22, LABELS[k], last or 0))
-        lx += 150
-
     header = ('<div class="chart-title">%s</div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>' % (title, subtitle, points[-1].get("ts", "")))
     svg = '<svg viewBox="0 0 %d %d">%s%s%s%s</svg>' % (
@@ -204,8 +189,7 @@ def render_chart(points, title, subtitle, n_target, x_when):
              '<th>10年期(%%)</th><th>30年期(%%)</th></tr>%s</table>'
              % "".join(rows))
 
-    return ('<div class="chart-card">%s%s<div class="legendbox">%s</div>%s</div>'
-            % (header, svg, "".join(legs), table))
+    return '<div class="chart-card">%s%s%s</div>' % (header, svg, table)
 
 
 def _when_day(ts):
@@ -225,9 +209,8 @@ def render(close_pts, intra_pts):
 
     head = ("<h1>美国国债收益率追踪</h1>"
             "<div class='sub'>5Y / 10Y / 30Y &nbsp;·&nbsp; "
-            "图表一：每美股交易日收盘价（最近 %d/60 个交易日）&nbsp;·&nbsp; "
-            "图表二：盘中每3小时采样（北京 23:00/02:00/05:00，开盘不采集，最近 %d/60 个采样点）</div>"
-            % (len(cpts), len(ipts)))
+            "图表一：每美股交易日收盘价 &nbsp;·&nbsp; "
+            "图表二：盘中每3小时采样（北京 23:00/02:00/05:00）</div>")
 
     # 顶部最新收盘价卡片（附图卡片风格）
     rate_cards_html = ""
@@ -277,7 +260,7 @@ def render(close_pts, intra_pts):
  .hint{color:#9aa9ba;font-size:12px;margin-top:14px}
 </style></head><body><div class="wrap">%s
 %s
-<div class="hint">数据来源：同花顺问财；盘中免费源受限，同一交易日内每3小时采样值可能保持不变，每日收盘后更新推进曲线。图表一取每交易日 06:00(北京) 最近的收盘采样，图表二只取 23:00/02:00/05:00 采样（开盘 20:00 不采集）。</div>
+<div class="hint">数据来源：同花顺问财；盘中免费源受限，同一交易日内每3小时采样值可能保持不变。</div>
 </div></body></html>""" % (head, body)
 
 
