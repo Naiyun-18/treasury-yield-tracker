@@ -130,7 +130,8 @@ def render_chart(points, title, subtitle, n_target, x_when):
     iw, ih = W - L - R, H - T - B
 
     def px(i):
-        return L + iw * (i / (len(points) - 1)) if len(points) > 1 else L + iw / 2
+        # 固定 60 个槽位坐标：有效数据从 Y 轴(左侧)排起，不足时右侧留空(新上市股票K线风格)
+        return L + iw * (i / (n_target - 1))
 
     def py(v):
         return T + ih * (1 - (v - ylo) / (yhi - ylo))
@@ -143,6 +144,11 @@ def render_chart(points, title, subtitle, n_target, x_when):
         return pts
 
     grid = []
+    # 固定槽位竖线：每 10 格一条虚线，提示保留的 60 个采样槽位(右侧留空)
+    for slot in (0, 10, 20, 30, 40, 50, 59):
+        sx = px(slot)
+        grid.append('<line x1="%.1f" y1="%d" x2="%.1f" y2="%d" stroke="#dde6f0" stroke-dasharray="2,4"/>'
+                    % (sx, T, sx, T + ih))
     for g in range(6):
         v = ylo + (yhi - ylo) * g / 5
         gy = py(v)
