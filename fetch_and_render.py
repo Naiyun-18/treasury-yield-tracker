@@ -258,10 +258,23 @@ def render(close_pts, intra_pts):
  .zoom-close{position:sticky;top:0;align-self:flex-end;cursor:pointer;font-size:20px;line-height:1;color:#fff;background:#c0392b;border:none;border-radius:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:none;margin:-6px -6px 6px 6px;z-index:10}
  .zoom-title{font-size:16px;font-weight:700;margin:0 0 12px;padding-right:44px}
  @media(max-width:768px){
+   body{padding:8px}
+   .sub{font-size:12px;line-height:1.6;margin-bottom:12px}
+   h1{font-size:19px}
+   .chart-card{padding:14px 10px;margin-bottom:14px}
+   .rate-cards{gap:8px;margin-bottom:12px}
+   .rate-card{padding:12px 12px;border-left-width:3px}
+   .rate-ico{width:18px;height:18px;border-radius:5px}
+   .rate-head{font-size:12px}
+   .rate-val{font-size:24px;margin-top:8px}
+   table{font-size:12px}
+   th,td{padding:6px 6px}
    .zoom-overlay{padding:0}
-   .zoom-box{width:100vw;height:100dvh;max-height:100dvh;border-radius:0;padding:10px}
-   .zoom-box svg{width:100%%;height:auto;max-width:100vw}
-   .zoom-title{font-size:15px}
+   .zoom-box{width:100vw;height:100dvh;max-height:100dvh;border-radius:0;padding:10px;display:block;overflow:auto;-webkit-overflow-scrolling:touch}
+   .zoom-box #zoomContent{width:max-content;min-width:100vw}
+   .zoom-box svg{height:calc(100dvh - 120px);width:auto;max-width:none;margin:0;display:block}
+   .zoom-close{position:static;float:right;margin:0 0 8px 8px}
+   .zoom-title{font-size:15px;clear:both}
  }
  svg{width:100%%;height:auto;display:block}
  .ylab{font-size:11px;fill:#7a8ca0}.xlab{font-size:10px;fill:#7a8ca0;text-anchor:middle}
