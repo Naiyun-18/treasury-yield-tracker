@@ -176,8 +176,7 @@ def render_chart(points, title, subtitle, n_target, x_when):
             x, y = pts[-1]
             dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[k]))
 
-    header = ('<div class="chart-top"><div class="chart-title">%s</div>'
-              '<span class="zoom-btn" onclick="openZoom(this.closest(\'.chart-card\'))">&#9210; 放大</span></div>'
+    header = ('<div class="chart-title">%s</div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>' % (title, subtitle, points[-1].get("ts", "")))
     svg = ('<svg viewBox="0 0 %d %d" class="zoomable" onclick="openZoom(this.closest(\'.chart-card\'))">'
            '%s%s%s%s</svg>' % (W, H, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots)))
@@ -251,16 +250,19 @@ def render(close_pts, intra_pts):
  .rate-ico{width:20px;height:20px;border-radius:6px;display:inline-block}
  .rate-val{font-size:34px;font-weight:800;margin-top:10px;line-height:1.1;letter-spacing:.5px}
  .rate-val b{font-size:14px;font-weight:600;margin-left:2px}
- .chart-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
- .zoom-btn{cursor:pointer;font-size:12px;color:#4a6b8a;background:#eef4fa;border:1px solid #d6e3f0;border-radius:8px;padding:5px 11px;white-space:nowrap;flex:none}
- .zoom-btn:hover{background:#dfeaf6}
  .zoomable{cursor:zoom-in}
- .zoom-overlay{position:fixed;inset:0;background:rgba(13,24,40,.82);z-index:999;display:none;align-items:center;justify-content:center;padding:14px}
+ .zoom-overlay{position:fixed;inset:0;background:rgba(10,18,30,.88);z-index:999;display:none;align-items:center;justify-content:center;padding:8px}
  .zoom-overlay.open{display:flex}
- .zoom-box{background:#fff;border-radius:12px;padding:22px;max-width:97vw;max-height:94vh;overflow:auto;position:relative;box-shadow:0 8px 40px rgba(0,0,0,.35)}
- .zoom-box svg{width:min(1200px,96vw);height:auto}
- .zoom-close{position:sticky;top:0;float:right;cursor:pointer;font-size:20px;line-height:1;color:#fff;background:#c0392b;border:none;border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;margin-left:8px;z-index:10}
- .zoom-title{font-size:16px;font-weight:700;margin-bottom:12px;padding-right:44px}
+ .zoom-box{background:#fff;border-radius:14px;padding:22px;width:min(1500px,100vw);max-height:calc(100vh - 16px);box-sizing:border-box;overflow:auto;position:relative;box-shadow:0 8px 40px rgba(0,0,0,.4);display:flex;flex-direction:column}
+ .zoom-box svg{width:100%%;height:auto;margin:auto}
+ .zoom-close{position:sticky;top:0;align-self:flex-end;cursor:pointer;font-size:20px;line-height:1;color:#fff;background:#c0392b;border:none;border-radius:8px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:none;margin:-6px -6px 6px 6px;z-index:10}
+ .zoom-title{font-size:16px;font-weight:700;margin:0 0 12px;padding-right:44px}
+ @media(max-width:768px){
+   .zoom-overlay{padding:0}
+   .zoom-box{width:100vw;height:100dvh;max-height:100dvh;border-radius:0;padding:10px}
+   .zoom-box svg{width:100%%;height:auto;max-width:100vw}
+   .zoom-title{font-size:15px}
+ }
  svg{width:100%%;height:auto;display:block}
  .ylab{font-size:11px;fill:#7a8ca0}.xlab{font-size:10px;fill:#7a8ca0;text-anchor:middle}
  .legendbox{padding-top:4px}
