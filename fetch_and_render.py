@@ -104,7 +104,7 @@ def load_data(path):
     return []
 
 
-def save_data(path, data):
+def save_data(data, path):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
     print("saved %d samples -> %s" % (len(data), path))
