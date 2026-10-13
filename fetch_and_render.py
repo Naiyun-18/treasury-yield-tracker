@@ -29,12 +29,15 @@ QUERIES = {"us2y": "美国2年期国债收益率",
            "us5y": "美国5年期国债收益率",
            "us10y": "美国10年期国债收益率",
            "us30y": "美国30年期国债收益率",
+           "eu2y": "德国2年期国债收益率",
+           "eu10y": "德国10年期国债收益率",
            "gold": "伦敦金现货"}
 KEYS = ["us2y", "us5y", "us10y", "us30y"]
+TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y"]
 LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "30年期",
-          "gold": "伦敦金"}
+          "eu2y": "欧盟2Y", "eu10y": "欧盟10Y", "gold": "伦敦金"}
 COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b",
-          "gold": "#d4af37"}
+          "eu2y": "#2e86c1", "eu10y": "#8e44ad", "gold": "#d4af37"}
 LINKS = {"us2y": "https://finance.baidu.com/bond/global-US2YT",
          "us5y": "https://finance.baidu.com/bond/global-US5YT",
          "us10y": "https://finance.baidu.com/bond/global-US10YT",
@@ -152,7 +155,7 @@ def _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target):
 def render_combined(points, title, subtitle, n_target, x_when):
     """图表一：伦敦金(左轴) + 2Y/10Y(右轴) 双轴折线。points=[{date,gold,us2y,us10y},...]"""
     gvals = [p["gold"] for p in points if p.get("gold") is not None]
-    yvals = [p[k] for p in points for k in ("us2y", "us10y") if p.get(k) is not None]
+    yvals = [p[k] for p in points for k in ("us2y", "us10y", "eu2y", "eu10y") if p.get(k) is not None]
     g_lo, g_hi = _axis(min(gvals), max(gvals)) if gvals else (4000, 4400)
     y_lo, y_hi = _axis(min(yvals), max(yvals)) if yvals else (4.7, 5.4)
 
@@ -180,7 +183,7 @@ def render_combined(points, title, subtitle, n_target, x_when):
     # 轴标题
     ax = ''.join([
         '<text x="%d" y="16" class="ylab" text-anchor="middle">伦敦金（美元/盎司）</text>' % (L + iw // 2),
-        '<text x="%d" y="16" class="ylab" text-anchor="end">美债收益率（%%）</text>' % (W - R - 6),
+        '<text x="%d" y="16" class="ylab" text-anchor="end">债券收益率（%%）</text>' % (W - R - 6),
     ])
 
     xlab = []
@@ -190,7 +193,8 @@ def render_combined(points, title, subtitle, n_target, x_when):
         xlab.append('<text x="%.1f" y="%d" class="xlab">%s</text>'
                     % (_px(idx, L, iw, n_target), H - B + 20, lab))
 
-    line_specs = [("gold", g_lo, g_hi), ("us2y", y_lo, y_hi), ("us10y", y_lo, y_hi)]
+    line_specs = [("gold", g_lo, g_hi), ("us2y", y_lo, y_hi), ("us10y", y_lo, y_hi),
+                  ("eu2y", y_lo, y_hi), ("eu10y", y_lo, y_hi)]
     polylines, dots = [], []
     for key, ylo, yhi in line_specs:
         pts = _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target)
@@ -203,7 +207,7 @@ def render_combined(points, title, subtitle, n_target, x_when):
 
     legend = ('<div class="legendbox">%s</div>' % "".join(
         '<span class="legend-dot" style="background:%s"></span><span class="legend-name">%s</span>'
-        % (COLORS[k], LABELS[k]) for k in ("gold", "us2y", "us10y")))
+        % (COLORS[k], LABELS[k]) for k in ("gold", "us2y", "us10y", "eu2y", "eu10y")))
 
     header = ('<div class="chart-title">%s</div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>'
@@ -218,9 +222,11 @@ def render_combined(points, title, subtitle, n_target, x_when):
         def cell(k):
             v = p.get(k)
             return ("%.3f" % v) if v is not None else "—"
-        rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
-                    % (p.get("date", ""), cell("gold"), cell("us2y"), cell("us10y")))
-    table = ('<table><tr><th>日期</th><th>伦敦金(美元/盎司)</th><th>2Y美债(%%)</th><th>10Y美债(%%)</th></tr>%s</table>'
+        rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                    % (p.get("date", ""), cell("gold"), cell("us2y"), cell("us10y"),
+                       cell("eu2y"), cell("eu10y")))
+    table = ('<table><tr><th>日期</th><th>伦敦金(美元/盎司)</th><th>2Y美债(%%)</th><th>10Y美债(%%)</th>'
+             '<th>2Y欧盟(%%)</th><th>10Y欧盟(%%)</th></tr>%s</table>'
              % "".join(rows))
 
     return '<div class="chart-card">%s%s%s%s</div>' % (header, legend, svg, table)
@@ -413,8 +419,8 @@ def render(close_pts, intra_pts, track_pts):
         return "<html><body><h2>暂无数据</h2></body></html>"
 
     head = ("<h1>各国国债和黄金价格追踪分析报告</h1>"
-            "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 伦敦金<br>"
-            "图表一：伦敦金+2Y+10Y 每日收盘 <b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
+            "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金<br>"
+            "图表一：伦敦金+美/欧 2Y/10Y 每日收盘 <b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
             "图表二：美债每日收盘 &nbsp;·&nbsp; "
             "图表三：盘中每3小时（北京 23:00/02:00/05:00）</div>")
 
@@ -447,8 +453,8 @@ def render(close_pts, intra_pts, track_pts):
                            '<div class="rate-cards">%s</div>' % "".join(cards))
 
     charts = "".join(filter(None, [
-        render_combined(tpts, "图表一 · 伦敦金与美债短长端每日收盘价",
-                        "伦敦金(左轴·美元/盎司) + 2Y / 10Y(右轴·%) · 横坐标 90 个交易日采样（每日更新）",
+        render_combined(tpts, "图表一 · 伦敦金与美/欧国债短长端每日收盘价",
+                        "伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) · 横坐标 90 个交易日采样（每日更新）",
                         90, _when_date) if tpts else None,
         render_chart(cpts, "图表二 · 美债每日收盘价走势",
                      "每美股交易日收盘价 · 横坐标 60 个交易日收盘采样", 60, _when_day) if cpts else None,
@@ -514,7 +520,7 @@ def main():
         track = load_data(TRACK)
         tdate = today_str()
         tsample = {"date": tdate}
-        for k in ("gold", "us2y", "us10y"):
+        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y"):
             if fetched.get(k) is not None:
                 tsample[k] = fetched[k]
         track = _upsert_track(track, tdate, tsample)
