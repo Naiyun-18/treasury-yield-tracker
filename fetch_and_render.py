@@ -31,13 +31,22 @@ QUERIES = {"us2y": "美国2年期国债收益率",
            "us30y": "美国30年期国债收益率",
            "eu2y": "德国2年期国债收益率",
            "eu10y": "德国10年期国债收益率",
+           "cny": "美元兑人民币汇率",
+           "eur": "欧元兑美元汇率",
+           "jpy": "美元兑日元汇率",
            "gold": "伦敦金现货"}
 KEYS = ["us2y", "us5y", "us10y", "us30y"]
-TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y"]
+TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y", "cny", "eur", "jpy"]
 LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "30年期",
-          "eu2y": "欧盟2Y", "eu10y": "欧盟10Y", "gold": "伦敦金"}
+          "eu2y": "欧盟2Y", "eu10y": "欧盟10Y",
+          "cny": "人民币兑美元", "eur": "欧元兑美元", "jpy": "日元兑美元(÷150)",
+          "gold": "伦敦金"}
+# 表格列名（展示真实值，不标÷150；÷150仅用于图表呈现）
+TAB_LABELS = {"jpy": "日元兑美元"}
 COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b",
-          "eu2y": "#2e86c1", "eu10y": "#8e44ad", "gold": "#d4af37"}
+          "eu2y": "#2e86c1", "eu10y": "#8e44ad",
+          "cny": "#16a085", "eur": "#e91e63", "jpy": "#5d6d7e",
+          "gold": "#d4af37"}
 LINKS = {"us2y": "https://finance.baidu.com/bond/global-US2YT",
          "us5y": "https://finance.baidu.com/bond/global-US5YT",
          "us10y": "https://finance.baidu.com/bond/global-US10YT",
@@ -58,7 +67,8 @@ def _api_key():
 
 
 def fetch_now():
-    """Fetch all 5 series from iwencai. Returns dict {us2y, us5y, us10y, us30y, gold}."""
+    """Fetch all series from iwencai. Returns {us2y, us5y, us10y, us30y, eu2y, eu10y, cny, eur, jpy, gold}.
+    US/EU 收益率走 '指标值'；外汇对走 '外汇@收盘价[YYYYMMDD]' 字段；伦敦金走 '指标值'。"""
     api_key = _api_key()
     out = {}
     for k, q in QUERIES.items():
@@ -70,7 +80,14 @@ def fetch_now():
             r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ))
             j = json.loads(r.stdout)
             if j.get("datas"):
-                val = float(j["datas"][0]["指标值"])
+                row = j["datas"][0]
+                val = row.get("指标值")
+                if val is None:
+                    for fk in row:
+                        if "收盘价" in fk:
+                            val = row[fk]
+                            break
+                val = float(val) if val is not None else None
         except Exception as e:
             print("ERR %s: %s" % (k, e), file=sys.stderr)
         out[k] = val
@@ -152,14 +169,20 @@ def _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target):
     return pts
 
 
-def render_combined(points, title, subtitle, n_target, x_when):
-    """图表一：伦敦金(左轴) + 2Y/10Y(右轴) 双轴折线。points=[{date,gold,us2y,us10y},...]"""
-    gvals = [p["gold"] for p in points if p.get("gold") is not None]
-    yvals = [p[k] for p in points for k in ("us2y", "us10y", "eu2y", "eu10y") if p.get(k) is not None]
+def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_target, x_when,
+                 left_axis_title="伦敦金（美元/盎司）", right_axis_title="债券收益率（%）",
+                 ylab_fmt="%.2f%%"):
+    """双轴折线图：left_key 在左轴，right_keys 在右轴(可各除以 divisors[key])。
+    points=[{date, ...},...]；divisors=None 或 {key: 除数}。用于图表一(金价+Yield)与图表二(金价+汇率)。"""
+    gvals = [p[left_key] for p in points if p.get(left_key) is not None]
+    def val(p, k):
+        d = divisors.get(k, 1.0) if divisors else 1.0
+        return p[k] / d if p.get(k) is not None else None
+    yvals = [val(p, k) for p in points for k in right_keys if val(p, k) is not None]
     g_lo, g_hi = _axis(min(gvals), max(gvals)) if gvals else (4000, 4400)
-    y_lo, y_hi = _axis(min(yvals), max(yvals)) if yvals else (4.7, 5.4)
+    y_lo, y_hi = _axis(min(yvals), max(yvals)) if yvals else (4.0, 8.0)
 
-    W, H, L, R, T, B = 1200, 620, 80, 70, 40, 55
+    W, H, L, R, T, B = 1200, 620, 88, 80, 40, 55
     iw, ih = W - L - R, H - T - B
 
     grid = []
@@ -167,7 +190,6 @@ def render_combined(points, title, subtitle, n_target, x_when):
         sx = _px(slot, L, iw, n_target)
         grid.append('<line x1="%.1f" y1="%d" x2="%.1f" y2="%d" stroke="#dde6f0" stroke-dasharray="2,4"/>'
                     % (sx, T, sx, T + ih))
-    # 左轴刻度(黄金) + 右侧刻度(利率)
     for g in range(6):
         glab = g_lo + (g_hi - g_lo) * g / 5
         gy = _py(glab, g_lo, g_hi, T, ih)
@@ -177,13 +199,12 @@ def render_combined(points, title, subtitle, n_target, x_when):
                     % (L - 8, gy + 4, glab))
         ylab = y_lo + (y_hi - y_lo) * g / 5
         yy = _py(ylab, y_lo, y_hi, T, ih)
-        grid.append('<text x="%d" y="%.1f" class="ylab">%.2f%%</text>'
-                    % (W - R + 10, yy + 4, ylab))
+        grid.append('<text x="%d" y="%.1f" class="ylab">%s</text>'
+                    % (W - R + 12, yy + 4, (ylab_fmt % ylab)))
 
-    # 轴标题
     ax = ''.join([
-        '<text x="%d" y="16" class="ylab" text-anchor="middle">伦敦金（美元/盎司）</text>' % (L + iw // 2),
-        '<text x="%d" y="16" class="ylab" text-anchor="end">债券收益率（%%）</text>' % (W - R - 6),
+        '<text x="%d" y="16" class="ylab" text-anchor="middle">%s</text>' % (L + iw // 2, left_axis_title),
+        '<text x="%d" y="16" class="ylab" text-anchor="end">%s</text>' % (W - R - 4, right_axis_title),
     ])
 
     xlab = []
@@ -193,11 +214,17 @@ def render_combined(points, title, subtitle, n_target, x_when):
         xlab.append('<text x="%.1f" y="%d" class="xlab">%s</text>'
                     % (_px(idx, L, iw, n_target), H - B + 20, lab))
 
-    line_specs = [("gold", g_lo, g_hi), ("us2y", y_lo, y_hi), ("us10y", y_lo, y_hi),
-                  ("eu2y", y_lo, y_hi), ("eu10y", y_lo, y_hi)]
+    def plot(key, ylo, yhi):
+        d = divisors.get(key, 1.0) if divisors else 1.0
+        pts = []
+        for i, p in enumerate(points):
+            if p.get(key) is not None:
+                pts.append((_px(i, L, iw, n_target), _py(p[key] / d, ylo, yhi, T, ih)))
+        return pts
+
     polylines, dots = [], []
-    for key, ylo, yhi in line_specs:
-        pts = _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target)
+    for key, ylo, yhi in [(left_key, g_lo, g_hi)] + [(k, y_lo, y_hi) for k in right_keys]:
+        pts = plot(key, ylo, yhi)
         if not pts:
             continue
         polylines.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="2.5"/>'
@@ -207,7 +234,7 @@ def render_combined(points, title, subtitle, n_target, x_when):
 
     legend = ('<div class="legendbox">%s</div>' % "".join(
         '<span class="legend-dot" style="background:%s"></span><span class="legend-name">%s</span>'
-        % (COLORS[k], LABELS[k]) for k in ("gold", "us2y", "us10y", "eu2y", "eu10y")))
+        % (COLORS[k], LABELS[k]) for k in [left_key] + right_keys))
 
     header = ('<div class="chart-title">%s</div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>'
@@ -217,17 +244,15 @@ def render_combined(points, title, subtitle, n_target, x_when):
            '%s%s%s%s%s</svg>'
            % (W, H, W, H, ax, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots)))
 
+    def cell(p, k):
+        v = p.get(k)
+        return ("%.3f" % v) if v is not None else "—"
     rows = []
     for p in reversed(points[-10:]):
-        def cell(k):
-            v = p.get(k)
-            return ("%.3f" % v) if v is not None else "—"
-        rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
-                    % (p.get("date", ""), cell("gold"), cell("us2y"), cell("us10y"),
-                       cell("eu2y"), cell("eu10y")))
-    table = ('<table><tr><th>日期</th><th>伦敦金(美元/盎司)</th><th>2Y美债(%%)</th><th>10Y美债(%%)</th>'
-             '<th>2Y欧盟(%%)</th><th>10Y欧盟(%%)</th></tr>%s</table>'
-             % "".join(rows))
+        rows.append("<tr><td>%s</td>%s</tr>"
+                    % (p.get("date", ""), "".join("<td>%s</td>" % cell(p, k) for k in [left_key] + right_keys)))
+    th = "".join("<th>%s</th>" % TAB_LABELS.get(k, LABELS[k]) for k in [left_key] + right_keys)
+    table = ('<table><tr><th>日期</th>%s</tr>%s</table>' % (th, "".join(rows)))
 
     return '<div class="chart-card">%s%s%s%s</div>' % (header, legend, svg, table)
 
@@ -419,10 +444,11 @@ def render(close_pts, intra_pts, track_pts):
         return "<html><body><h2>暂无数据</h2></body></html>"
 
     head = ("<h1>各国国债和黄金价格追踪分析报告</h1>"
-            "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金<br>"
+            "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金 ＋ 主要汇率<br>"
             "图表一：伦敦金+美/欧 2Y/10Y 每日收盘 <b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
-            "图表二：美债每日收盘 &nbsp;·&nbsp; "
-            "图表三：盘中每3小时（北京 23:00/02:00/05:00）</div>")
+            "图表二：伦敦金+主要汇率 <b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
+            "图表三：美债每日收盘 &nbsp;·&nbsp; "
+            "图表四：盘中每3小时（北京 23:00/02:00/05:00）</div>")
 
     # 顶部最新收盘卡片：伦敦金 + 美债各期限
     rate_cards_html = ""
@@ -453,12 +479,17 @@ def render(close_pts, intra_pts, track_pts):
                            '<div class="rate-cards">%s</div>' % "".join(cards))
 
     charts = "".join(filter(None, [
-        render_combined(tpts, "图表一 · 伦敦金与美/欧国债短长端每日收盘价",
-                        "伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) · 横坐标 90 个交易日采样（每日更新）",
-                        90, _when_date) if tpts else None,
-        render_chart(cpts, "图表二 · 美债每日收盘价走势",
+        render_dual(tpts, "gold", ["us2y", "us10y", "eu2y", "eu10y"], None,
+                    "图表一 · 伦敦金与美/欧国债短长端每日收盘价",
+                    "伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) · 横坐标 90 个交易日采样（每日更新）",
+                    90, _when_date, "伦敦金（美元/盎司）", "债券收益率（%%）", "%.2f%%") if tpts else None,
+        render_dual(tpts, "gold", ["cny", "eur", "jpy"], {"jpy": 150},
+                    "图表二 · 主要汇率走向与伦敦金每日收盘价",
+                    "伦敦金(左轴·美元/盎司) · 人民币兑美元 / 欧元兑美元 / 日元兑美元(÷150)(右轴) · 横坐标 90 个交易日采样（每工作日更新）",
+                    90, _when_date, "伦敦金（美元/盎司）", "汇率（日元÷150）", "%.2f") if tpts else None,
+        render_chart(cpts, "图表三 · 美债每日收盘价走势",
                      "每美股交易日收盘价 · 横坐标 60 个交易日收盘采样", 60, _when_day) if cpts else None,
-        render_chart(ipts, "图表三 · 盘中每3小时利率走势",
+        render_chart(ipts, "图表四 · 盘中每3小时利率走势",
                      "交易日（北京 23:00 / 02:00 / 05:00）· 横坐标 60 个采样点（约 20 个交易日）", 60, _when_intra) if ipts else None,
     ]))
 
@@ -520,7 +551,7 @@ def main():
         track = load_data(TRACK)
         tdate = today_str()
         tsample = {"date": tdate}
-        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y"):
+        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy"):
             if fetched.get(k) is not None:
                 tsample[k] = fetched[k]
         track = _upsert_track(track, tdate, tsample)
