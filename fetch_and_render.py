@@ -41,7 +41,7 @@ LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "3
           "eu2y": "欧盟2Y", "eu10y": "欧盟10Y",
           "cny": "美元兑人民币(÷6)", "eur": "美元兑欧元", "jpy": "美元兑日元(÷150)",
           "gold": "伦敦金",
-          "brent": "布伦特石油(×40)"}
+          "brent": "布伦特石油（美元/桶）"}
 # 表格列名（展示真实值，不标÷除数；除法仅用于图表呈现）
 TAB_LABELS = {"cny": "美元兑人民币", "jpy": "美元兑日元", "brent": "布伦特石油"}
 COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b",
@@ -198,82 +198,127 @@ def _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target):
     return pts
 
 
-def render_dual(points, left_keys, right_keys, divisors, title, subtitle, n_target, x_when,
+def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_target, x_when,
                  left_axis_title="伦敦金（美元/盎司）", right_axis_title="债券收益率（%）",
-                 ylab_fmt="%.2f%%"):
-    """双轴折线图：left_keys 在左轴(可多个，各可除以 divisors[key])，right_keys 在右轴(可各除 divisors[key])。
+                 ylab_fmt="%.2f%%", bottom_key=None, bottom_title="布伦特石油主力（美元/桶）"):
+    """双轴折线图（上下双面板，共享同一X轴）：
+      上图 = left_key(左轴·金价) + right_keys(右轴)；
+      下图(可选) = bottom_key 单线，独立左轴刻度(真实值)，与上图共享X轴。
     points=[{date, ...},...]；divisors=None 或 {key: 除数}。用于图表一(金价+Yield)与图表二(金价+汇率)。"""
-    if isinstance(left_keys, str):
-        left_keys = [left_keys]
     def dv(k):
         return divisors.get(k, 1.0) if divisors else 1.0
-    gvals = [p[k] / dv(k) for p in points for k in left_keys if p.get(k) is not None]
+    gvals = [p[left_key] / dv(left_key) for p in points if p.get(left_key) is not None]
     yvals = [p[k] / dv(k) for p in points for k in right_keys if p.get(k) is not None]
     g_lo, g_hi = _axis(min(gvals), max(gvals)) if gvals else (4000, 4400)
     y_lo, y_hi = _axis(min(yvals), max(yvals)) if yvals else (4.0, 8.0)
 
-    W, H, L, R, T, B = 1200, 620, 88, 80, 40, 55
-    iw, ih = W - L - R, H - T - B
+    W, L, R = 1200, 88, 80
+    iw = W - L - R
+    top_y, top_h, bot_y, bot_h = 45, 275, 358, 178
+    bot_end = bot_y + bot_h
+    H = bot_end + 52
+    xlbl_y = bot_end + 24
 
-    grid = []
+    b_lo = b_hi = None
+    if bottom_key:
+        bvals = [p[bottom_key] for p in points if p.get(bottom_key) is not None]
+        if bvals:
+            b_lo, b_hi = _axis(min(bvals), max(bvals))
+        else:
+            b_lo, b_hi = (95.0, 110.0)
+
+    parts = ['<line x1="0" y1="0" x2="%d" y2="0" stroke="#f5f7fa" stroke-width="0"/>' % W]
+    # 垂直网格线跨上下两面板（共享X轴）
+    vgrid = []
     for slot in (0, 15, 30, 45, 60, 75, 89):
         sx = _px(slot, L, iw, n_target)
-        grid.append('<line x1="%.1f" y1="%d" x2="%.1f" y2="%d" stroke="#dde6f0" stroke-dasharray="2,4"/>'
-                    % (sx, T, sx, T + ih))
+        vgrid.append('<line x1="%.1f" y1="%d" x2="%.1f" y2="%d" stroke="#dde6f0" stroke-dasharray="2,4"/>'
+                     % (sx, top_y, sx, bot_end))
+    parts.append("".join(vgrid))
+
+    # 上图横向网格 + 左轴金价 + 右轴%
+    tg = []
     for g in range(6):
         glab = g_lo + (g_hi - g_lo) * g / 5
-        gy = _py(glab, g_lo, g_hi, T, ih)
-        grid.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#ececec"/>'
-                    % (L, gy, W - R, gy))
-        grid.append('<text x="%d" y="%.1f" class="ylab" text-anchor="end">%.0f</text>'
-                    % (L - 8, gy + 4, glab))
+        gy = _py(glab, g_lo, g_hi, top_y, top_h)
+        tg.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#ececec"/>' % (L, gy, W - R, gy))
+        tg.append('<text x="%d" y="%.1f" class="ylab" text-anchor="end">%.0f</text>' % (L - 8, gy + 4, glab))
         ylab = y_lo + (y_hi - y_lo) * g / 5
-        yy = _py(ylab, y_lo, y_hi, T, ih)
-        grid.append('<text x="%d" y="%.1f" class="ylab">%s</text>'
-                    % (W - R + 12, yy + 4, (ylab_fmt % ylab)))
+        yy = _py(ylab, y_lo, y_hi, top_y, top_h)
+        tg.append('<text x="%d" y="%.1f" class="ylab">%s</text>' % (W - R + 12, yy + 4, ylab_fmt % ylab))
+    parts.append("".join(tg))
 
     ax = ''.join([
         '<text x="%d" y="16" class="ylab" text-anchor="middle">%s</text>' % (L + iw // 2, left_axis_title),
         '<text x="%d" y="16" class="ylab" text-anchor="end">%s</text>' % (W - R - 4, right_axis_title),
     ])
+    parts.append(ax)
 
+    # 下图横向网格 + 布伦特左轴
+    bot = []
+    if bottom_key and b_lo is not None:
+        for g in range(5):
+            blab = b_lo + (b_hi - b_lo) * g / 4
+            by = _py(blab, b_lo, b_hi, bot_y, bot_h)
+            bot.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#ececec"/>' % (L, by, W - R, by))
+            bot.append('<text x="%d" y="%.1f" class="ylab" text-anchor="end">%.0f</text>' % (L - 8, by + 4, blab))
+        bot.append('<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="#9db3c9" stroke-width="1.5"/>'
+                   % (L, bot_y - 20, W - R, bot_y - 20))
+        bot.append('<text x="%d" y="%d" class="ylab" text-anchor="middle" font-weight="600">%s</text>'
+                   % (L + iw // 2, bot_y - 26, bottom_title))
+    parts.append("".join(bot))
+
+    # X轴标签（最底部，上下两图共享）
     xlab = []
-    idxs = sorted(set([0, len(points) // 2, len(points) - 1]))
-    for idx in idxs:
+    for idx in sorted(set([0, len(points) // 2, len(points) - 1])):
         lab = x_when(points[idx].get("date", ""))
-        xlab.append('<text x="%.1f" y="%d" class="xlab">%s</text>'
-                    % (_px(idx, L, iw, n_target), H - B + 20, lab))
+        xlab.append('<text x="%.1f" y="%d" class="xlab">%s</text>' % (_px(idx, L, iw, n_target), xlbl_y, lab))
+    parts.append("".join(xlab))
 
-    def plot(key, ylo, yhi):
+    def series_pts(key, ylo, yhi, ytop, yh):
         d = dv(key)
         pts = []
         for i, p in enumerate(points):
             if p.get(key) is not None:
-                pts.append((_px(i, L, iw, n_target), _py(p[key] / d, ylo, yhi, T, ih)))
+                pts.append((_px(i, L, iw, n_target), _py(p[key] / d, ylo, yhi, ytop, yh)))
         return pts
 
     polylines, dots = [], []
-    for key, ylo, yhi in [(k, g_lo, g_hi) for k in left_keys] + [(k, y_lo, y_hi) for k in right_keys]:
-        pts = plot(key, ylo, yhi)
-        if not pts:
-            continue
+    pts = series_pts(left_key, g_lo, g_hi, top_y, top_h)
+    if pts:
         polylines.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="2.5"/>'
-                         % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[key]))
+                         % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[left_key]))
         x, y = pts[-1]
-        dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[key]))
+        dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[left_key]))
+    for k in right_keys:
+        pts = series_pts(k, y_lo, y_hi, top_y, top_h)
+        if pts:
+            polylines.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="2.5"/>'
+                             % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[k]))
+            x, y = pts[-1]
+            dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[k]))
+    if bottom_key and b_lo is not None:
+        pts = series_pts(bottom_key, b_lo, b_hi, bot_y, bot_h)
+        if pts:
+            polylines.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="2.5"/>'
+                             % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[bottom_key]))
+            x, y = pts[-1]
+            dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[bottom_key]))
+    parts.append("".join(polylines) + "".join(dots))
 
+    legend_keys = [left_key] + right_keys + ([bottom_key] if bottom_key else [])
     legend = ('<div class="legendbox">%s</div>' % "".join(
         '<span class="legend-dot" style="background:%s"></span><span class="legend-name">%s</span>'
-        % (COLORS[k], LABELS[k]) for k in left_keys + right_keys))
+        % (COLORS[k], LABELS[k]) for k in legend_keys))
 
-    cols = left_keys + right_keys
+    cols = legend_keys
     header = ('<div class="chart-title">%s</div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>'
               % (title, subtitle, points[-1].get("date", "")))
     svg = ('<svg viewBox="0 0 %d %d" class="zoomable" onclick="openZoom(this.closest(\'.chart-card\'))">'
            '<rect x="0" y="0" width="%d" height="%d" fill="#ffffff"/>'
-           '%s%s%s%s%s</svg>'
-           % (W, H, W, H, ax, "".join(grid), "".join(xlab), "".join(polylines), "".join(dots)))
+           '%s</svg>'
+           % (W, H, W, H, "".join(parts)))
 
     def cell(p, k):
         v = p.get(k)
@@ -476,8 +521,8 @@ def render(close_pts, intra_pts, track_pts):
 
     head = ("<h1>各国国债和黄金价格追踪分析报告</h1>"
             "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金 ＋ 布伦特石油 ＋ 主要汇率<br>"
-            "图表一：伦敦金+布伦特石油+美/欧 2Y/10Y 每日收盘 <b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
-            "图表二：伦敦金+布伦特石油+主要汇率 <b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
+            "图表一：伦敦金+美/欧 2Y/10Y（每图下方附图含布伦特石油）<b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
+            "图表二：伦敦金+主要汇率（每图下方附图含布伦特石油）<b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
             "图表三：美债每日收盘 &nbsp;·&nbsp; "
             "图表四：盘中每3小时（北京 23:00/02:00/05:00）</div>")
 
@@ -510,14 +555,16 @@ def render(close_pts, intra_pts, track_pts):
                            '<div class="rate-cards">%s</div>' % "".join(cards))
 
     charts = "".join(filter(None, [
-        render_dual(tpts, ["gold", "brent"], ["us2y", "us10y", "eu2y", "eu10y"], {"brent": 0.025},
+        render_dual(tpts, "gold", ["us2y", "us10y", "eu2y", "eu10y"], None,
                     "图表一 · 伦敦金与美/欧国债短长端每日收盘价",
-                    "伦敦金/布伦特石油(×40)(左轴·美元) + 美/欧 2Y / 10Y(右轴·%) · 横坐标 90 个交易日采样（每日更新）",
-                    90, _when_date, "伦敦金/布伦特（美元）", "债券收益率（%%）", "%.2f%%") if tpts else None,
-        render_dual(tpts, ["gold", "brent"], ["cny", "eur", "jpy"], {"jpy": 150, "cny": 6, "brent": 0.025},
-                    "图表二 · 主要汇率走向与伦敦金/布伦特每日收盘价",
-                    "伦敦金/布伦特石油(×40)(左轴·美元) · 美元兑人民币(÷6) / 美元兑欧元 / 美元兑日元(÷150)(右轴) · 横坐标 90 个交易日采样（每工作日更新）",
-                    90, _when_date, "伦敦金/布伦特（美元）", "汇率（美元兑X）", "%.2f") if tpts else None,
+                    "上图：伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) &nbsp;下图：布伦特石油主力(美元/桶,独立刻度) &nbsp;·&nbsp; 上下两图共享同一X轴（90 个交易日采样，每日更新）",
+                    90, _when_date, "伦敦金（美元/盎司）", "债券收益率（%）", "%.2f%%",
+                    bottom_key="brent") if tpts else None,
+        render_dual(tpts, "gold", ["cny", "eur", "jpy"], {"jpy": 150, "cny": 6},
+                    "图表二 · 主要汇率走向与伦敦金每日收盘价",
+                    "上图：伦敦金(左轴·美元/盎司) + 美元兑人民币(÷6)/美元兑欧元/美元兑日元(÷150)(右轴) &nbsp;下图：布伦特石油主力(美元/桶,独立刻度) &nbsp;·&nbsp; 上下两图共享同一X轴（90 个交易日采样，每工作日更新）",
+                    90, _when_date, "伦敦金（美元/盎司）", "汇率（美元兑X）", "%.2f",
+                    bottom_key="brent") if tpts else None,
         render_chart(cpts, "图表三 · 美债每日收盘价走势",
                      "每美股交易日收盘价 · 横坐标 60 个交易日收盘采样", 60, _when_day) if cpts else None,
         render_chart(ipts, "图表四 · 盘中每3小时利率走势",
