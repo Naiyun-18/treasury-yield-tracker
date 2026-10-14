@@ -1,4 +1,4 @@
-各国国债和黄金价格追踪分析报告
+国债和黄金石油价格跟踪报告
 
 Generated page: https://naiyun-18.github.io/treasury-yield-tracker/
 

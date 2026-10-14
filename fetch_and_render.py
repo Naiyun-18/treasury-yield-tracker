@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-各国国债和黄金价格追踪分析报告 - fetch US treasury yields + London gold close + render HTML.
+国债和黄金石油价格跟踪报告 - fetch US treasury yields + London gold + Brent oil + render HTML.
 
 Data source: 同花顺问财 (hithink-macro-query). 每采样点写入对应数据文件，然后渲染自包含 HTML。
 
@@ -519,7 +519,7 @@ def render(close_pts, intra_pts, track_pts):
     if not cpts and not ipts and not tpts:
         return "<html><body><h2>暂无数据</h2></body></html>"
 
-    head = ("<h1>各国国债和黄金价格追踪分析报告</h1>"
+    head = ("<h1>国债和黄金石油价格跟踪报告</h1>"
             "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金 ＋ 布伦特石油 ＋ 主要汇率<br>"
             "图表一：伦敦金+美/欧 2Y/10Y（每图下方附图含布伦特石油）<b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
             "图表二：伦敦金+主要汇率（每图下方附图含布伦特石油）<b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
@@ -575,7 +575,7 @@ def render(close_pts, intra_pts, track_pts):
 
     return ("<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            "<title>各国国债和黄金价格追踪分析报告</title>"
+            "<title>国债和黄金石油价格跟踪报告</title>"
             + CSS + "</head><body><div class=\"wrap\">%s\n%s\n"
             "<div class=\"hint\">数据来源：同花顺问财；图表一按交易日每日更新（伦敦金周末休市）；盘中免费源受限，同一交易日内每3小时采样值可能保持不变。</div>"
             "<div id=\"zoomBox\" class=\"zoom-overlay\"><div class=\"zoom-box\">"
