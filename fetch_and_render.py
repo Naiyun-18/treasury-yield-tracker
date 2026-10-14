@@ -36,17 +36,18 @@ QUERIES = {"us2y": "美国2年期国债收益率",
            "jpy": "美元兑日元汇率",
            "gold": "伦敦金现货"}
 KEYS = ["us2y", "us5y", "us10y", "us30y"]
-TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y", "cny", "eur", "jpy"]
+TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y", "cny", "eur", "jpy", "brent"]
 LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "30年期",
           "eu2y": "欧盟2Y", "eu10y": "欧盟10Y",
           "cny": "美元兑人民币(÷6)", "eur": "美元兑欧元", "jpy": "美元兑日元(÷150)",
-          "gold": "伦敦金"}
+          "gold": "伦敦金",
+          "brent": "布伦特石油(×40)"}
 # 表格列名（展示真实值，不标÷除数；除法仅用于图表呈现）
-TAB_LABELS = {"cny": "美元兑人民币", "jpy": "美元兑日元"}
+TAB_LABELS = {"cny": "美元兑人民币", "jpy": "美元兑日元", "brent": "布伦特石油"}
 COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b",
           "eu2y": "#2e86c1", "eu10y": "#8e44ad",
           "cny": "#16a085", "eur": "#e91e63", "jpy": "#5d6d7e",
-          "gold": "#d4af37"}
+          "gold": "#d4af37", "brent": "#34495e"}
 LINKS = {"us2y": "https://finance.baidu.com/bond/global-US2YT",
          "us5y": "https://finance.baidu.com/bond/global-US5YT",
          "us10y": "https://finance.baidu.com/bond/global-US10YT",
@@ -92,6 +93,34 @@ def fetch_now():
             print("ERR %s: %s" % (k, e), file=sys.stderr)
         out[k] = val
     return out
+
+
+def fetch_brent_series():
+    """布伦特原油连续收盘历史序列 {YYYY-MM-DD: val}（宏观@值[日期] 字段，美元/桶）。
+    走「期货收盘价(连续):布伦特原油:ICE」，仅收盘采样时调用。"""
+    api_key = _api_key()
+    try:
+        q = "布伦特原油 收盘价 交易日期"
+        cmd = [sys.executable, CLI, "--query", q, "--timeout", "40"]
+        if api_key:
+            cmd += ["--api-key", api_key]
+        r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ))
+        j = json.loads(r.stdout)
+        if j.get("datas"):
+            row = j["datas"][0]
+            out = {}
+            for fk, v in row.items():
+                if fk.startswith("宏观@值[") and v is not None:
+                    raw = fk.replace("宏观@值[", "").replace("]", "")
+                    d = ("%s-%s-%s" % (raw[:4], raw[4:6], raw[6:8])) if len(raw) == 8 else raw
+                    try:
+                        out[d] = float(v)
+                    except Exception:
+                        pass
+            return out
+    except Exception as e:
+        print("ERR brent: %s" % e, file=sys.stderr)
+    return {}
 
 
 def load_data(path):
@@ -169,16 +198,17 @@ def _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target):
     return pts
 
 
-def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_target, x_when,
+def render_dual(points, left_keys, right_keys, divisors, title, subtitle, n_target, x_when,
                  left_axis_title="伦敦金（美元/盎司）", right_axis_title="债券收益率（%）",
                  ylab_fmt="%.2f%%"):
-    """双轴折线图：left_key 在左轴，right_keys 在右轴(可各除以 divisors[key])。
+    """双轴折线图：left_keys 在左轴(可多个，各可除以 divisors[key])，right_keys 在右轴(可各除 divisors[key])。
     points=[{date, ...},...]；divisors=None 或 {key: 除数}。用于图表一(金价+Yield)与图表二(金价+汇率)。"""
-    gvals = [p[left_key] for p in points if p.get(left_key) is not None]
-    def val(p, k):
-        d = divisors.get(k, 1.0) if divisors else 1.0
-        return p[k] / d if p.get(k) is not None else None
-    yvals = [val(p, k) for p in points for k in right_keys if val(p, k) is not None]
+    if isinstance(left_keys, str):
+        left_keys = [left_keys]
+    def dv(k):
+        return divisors.get(k, 1.0) if divisors else 1.0
+    gvals = [p[k] / dv(k) for p in points for k in left_keys if p.get(k) is not None]
+    yvals = [p[k] / dv(k) for p in points for k in right_keys if p.get(k) is not None]
     g_lo, g_hi = _axis(min(gvals), max(gvals)) if gvals else (4000, 4400)
     y_lo, y_hi = _axis(min(yvals), max(yvals)) if yvals else (4.0, 8.0)
 
@@ -215,7 +245,7 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
                     % (_px(idx, L, iw, n_target), H - B + 20, lab))
 
     def plot(key, ylo, yhi):
-        d = divisors.get(key, 1.0) if divisors else 1.0
+        d = dv(key)
         pts = []
         for i, p in enumerate(points):
             if p.get(key) is not None:
@@ -223,7 +253,7 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
         return pts
 
     polylines, dots = [], []
-    for key, ylo, yhi in [(left_key, g_lo, g_hi)] + [(k, y_lo, y_hi) for k in right_keys]:
+    for key, ylo, yhi in [(k, g_lo, g_hi) for k in left_keys] + [(k, y_lo, y_hi) for k in right_keys]:
         pts = plot(key, ylo, yhi)
         if not pts:
             continue
@@ -234,8 +264,9 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
 
     legend = ('<div class="legendbox">%s</div>' % "".join(
         '<span class="legend-dot" style="background:%s"></span><span class="legend-name">%s</span>'
-        % (COLORS[k], LABELS[k]) for k in [left_key] + right_keys))
+        % (COLORS[k], LABELS[k]) for k in left_keys + right_keys))
 
+    cols = left_keys + right_keys
     header = ('<div class="chart-title">%s</div>'
               '<div class="chart-sub">%s &nbsp;·&nbsp; 最新采样：%s</div>'
               % (title, subtitle, points[-1].get("date", "")))
@@ -250,8 +281,8 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
     rows = []
     for p in reversed(points[-10:]):
         rows.append("<tr><td>%s</td>%s</tr>"
-                    % (p.get("date", ""), "".join("<td>%s</td>" % cell(p, k) for k in [left_key] + right_keys)))
-    th = "".join("<th>%s</th>" % TAB_LABELS.get(k, LABELS[k]) for k in [left_key] + right_keys)
+                    % (p.get("date", ""), "".join("<td>%s</td>" % cell(p, k) for k in cols)))
+    th = "".join("<th>%s</th>" % TAB_LABELS.get(k, LABELS[k]) for k in cols)
     table = ('<table><tr><th>日期</th>%s</tr>%s</table>' % (th, "".join(rows)))
 
     return '<div class="chart-card">%s%s%s%s</div>' % (header, legend, svg, table)
@@ -444,9 +475,9 @@ def render(close_pts, intra_pts, track_pts):
         return "<html><body><h2>暂无数据</h2></body></html>"
 
     head = ("<h1>各国国债和黄金价格追踪分析报告</h1>"
-            "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金 ＋ 主要汇率<br>"
-            "图表一：伦敦金+美/欧 2Y/10Y 每日收盘 <b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
-            "图表二：伦敦金+主要汇率 <b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
+            "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金 ＋ 布伦特石油 ＋ 主要汇率<br>"
+            "图表一：伦敦金+布伦特石油+美/欧 2Y/10Y 每日收盘 <b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
+            "图表二：伦敦金+布伦特石油+主要汇率 <b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
             "图表三：美债每日收盘 &nbsp;·&nbsp; "
             "图表四：盘中每3小时（北京 23:00/02:00/05:00）</div>")
 
@@ -479,14 +510,14 @@ def render(close_pts, intra_pts, track_pts):
                            '<div class="rate-cards">%s</div>' % "".join(cards))
 
     charts = "".join(filter(None, [
-        render_dual(tpts, "gold", ["us2y", "us10y", "eu2y", "eu10y"], None,
+        render_dual(tpts, ["gold", "brent"], ["us2y", "us10y", "eu2y", "eu10y"], {"brent": 0.025},
                     "图表一 · 伦敦金与美/欧国债短长端每日收盘价",
-                    "伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) · 横坐标 90 个交易日采样（每日更新）",
-                    90, _when_date, "伦敦金（美元/盎司）", "债券收益率（%%）", "%.2f%%") if tpts else None,
-        render_dual(tpts, "gold", ["cny", "eur", "jpy"], {"jpy": 150, "cny": 6},
-                    "图表二 · 主要汇率走向与伦敦金每日收盘价",
-                    "伦敦金(左轴·美元/盎司) · 美元兑人民币(÷6) / 美元兑欧元 / 美元兑日元(÷150)(右轴) · 横坐标 90 个交易日采样（每工作日更新）",
-                    90, _when_date, "伦敦金（美元/盎司）", "汇率（美元兑X）", "%.2f") if tpts else None,
+                    "伦敦金/布伦特石油(×40)(左轴·美元) + 美/欧 2Y / 10Y(右轴·%) · 横坐标 90 个交易日采样（每日更新）",
+                    90, _when_date, "伦敦金/布伦特（美元）", "债券收益率（%%）", "%.2f%%") if tpts else None,
+        render_dual(tpts, ["gold", "brent"], ["cny", "eur", "jpy"], {"jpy": 150, "cny": 6, "brent": 0.025},
+                    "图表二 · 主要汇率走向与伦敦金/布伦特每日收盘价",
+                    "伦敦金/布伦特石油(×40)(左轴·美元) · 美元兑人民币(÷6) / 美元兑欧元 / 美元兑日元(÷150)(右轴) · 横坐标 90 个交易日采样（每工作日更新）",
+                    90, _when_date, "伦敦金/布伦特（美元）", "汇率（美元兑X）", "%.2f") if tpts else None,
         render_chart(cpts, "图表三 · 美债每日收盘价走势",
                      "每美股交易日收盘价 · 横坐标 60 个交易日收盘采样", 60, _when_day) if cpts else None,
         render_chart(ipts, "图表四 · 盘中每3小时利率走势",
@@ -550,8 +581,16 @@ def main():
 
         track = load_data(TRACK)
         tdate = today_str()
+        # 布伦特石油：额外抓取连续主力收盘序列(宏观@值[日期])，取最新已知值并回填历史
+        brent_full = fetch_brent_series()
+        if brent_full:
+            fetched["brent"] = brent_full[max(brent_full)]
+            for s in track:
+                d = s.get("date")
+                if d and d in brent_full and s.get("brent") is None:
+                    s["brent"] = brent_full[d]
         tsample = {"date": tdate}
-        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy"):
+        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy", "brent"):
             if fetched.get(k) is not None:
                 tsample[k] = fetched[k]
         track = _upsert_track(track, tdate, tsample)
