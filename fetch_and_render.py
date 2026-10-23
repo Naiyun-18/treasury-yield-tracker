@@ -69,28 +69,33 @@ def _api_key():
 
 def fetch_now():
     """Fetch all series from iwencai. Returns {us2y, us5y, us10y, us30y, eu2y, eu10y, cny, eur, jpy, gold}.
-    US/EU 收益率走 '指标值'；外汇对走 '外汇@收盘价[YYYYMMDD]' 字段；伦敦金走 '指标值'。"""
+    US/EU 收益率走 '指标值'；外汇对走 '外汇@收盘价/最新价[YYYYMMDD]' 字段；伦敦金走 '指标值'。"""
     api_key = _api_key()
     out = {}
     for k, q in QUERIES.items():
         val = None
-        try:
-            cmd = [sys.executable, CLI, "--query", q, "--timeout", "40"]
-            if api_key:
-                cmd += ["--api-key", api_key]
-            r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ))
-            j = json.loads(r.stdout)
-            if j.get("datas"):
-                row = j["datas"][0]
-                val = row.get("指标值")
-                if val is None:
-                    for fk in row:
-                        if "收盘价" in fk:
-                            val = row[fk]
-                            break
-                val = float(val) if val is not None else None
-        except Exception as e:
-            print("ERR %s: %s" % (k, e), file=sys.stderr)
+        for attempt in range(3):
+            try:
+                cmd = [sys.executable, CLI, "--query", q, "--timeout", "40"]
+                if api_key:
+                    cmd += ["--api-key", api_key]
+                r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ))
+                j = json.loads(r.stdout)
+                if j.get("datas"):
+                    row = j["datas"][0]
+                    val = row.get("指标值")
+                    if val is None:
+                        for fk in row:
+                            # 兼容收盘价/最新价字段名，避免因字段名变化解析失败导致当天数据缺失
+                            if ("收盘价" in fk) or ("最新价" in fk):
+                                val = row[fk]
+                                break
+                    val = float(val) if val is not None else None
+                if val is not None:
+                    break
+            except Exception as e:
+                if attempt == 2:
+                    print("ERR %s: %s" % (k, e), file=sys.stderr)
         out[k] = val
     return out
 
