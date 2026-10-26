@@ -16,7 +16,7 @@ Data files:
   intraday_data.json   - intraday samples     {ts, us2y, us5y, us10y, us30y}
   track_daily.json     - 图表一每日收盘       {date, gold, us2y, us10y}
 """
-import os, json, sys, subprocess, datetime
+import os, json, re, sys, subprocess, datetime
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 CLOSE = os.path.join(BASE, "close_data.json")
@@ -67,9 +67,39 @@ def _api_key():
     return k
 
 
+def _extract_value(row):
+    """Robustly extract a numeric value from an iwencai row, independent of field-name drift.
+    优先级：①指标值 ②外汇dated字段(形如 外汇@收盘价/最新价/值[YYYYMMDD]，取最新日期) ③任意数字型外汇字段。
+    修复：此前仅匹配字面含'收盘价/最新价'的字段名，问财外汇字段名会漂移(曾在'收盘价'与'最新价'间切换)，
+    导致 cny/eur/jpy 被静默置 None、当日汇率整段缺失。此实现改为按 [YYYYMMDD] 日期标记通用匹配，字段名漂移不再丢数据。"""
+    v = row.get("指标值")
+    if v is not None and (isinstance(v, (int, float)) or (isinstance(v, str) and v.strip())):
+        try:
+            return float(v)
+        except Exception:
+            pass
+    dated_re = re.compile(r"^外汇@[^\[]*\[(\d{8})")
+    best, best_d = None, None
+    for fk, fv in row.items():
+        if not fk.startswith("外汇@"):
+            continue
+        m = dated_re.match(fk)
+        try:
+            num = float(fv)
+        except Exception:
+            continue
+        if m:
+            d = int(m.group(1))
+            if best_d is None or d > best_d:
+                best, best_d = num, d
+        elif best is None and "代码" not in fk and "名称" not in fk:
+            best = num
+    return best
+
+
 def fetch_now():
     """Fetch all series from iwencai. Returns {us2y, us5y, us10y, us30y, eu2y, eu10y, cny, eur, jpy, gold}.
-    US/EU 收益率走 '指标值'；外汇对走 '外汇@收盘价/最新价[YYYYMMDD]' 字段；伦敦金走 '指标值'。"""
+    US/EU 收益率走 '指标值'；外汇对走 '外汇@...收盘价/最新价/值[YYYYMMDD]' 字段；伦敦金走 '指标值'。"""
     api_key = _api_key()
     out = {}
     for k, q in QUERIES.items():
@@ -83,13 +113,7 @@ def fetch_now():
                 j = json.loads(r.stdout)
                 if j.get("datas"):
                     row = j["datas"][0]
-                    val = row.get("指标值")
-                    if val is None:
-                        for fk in row:
-                            # 兼容收盘价/最新价字段名，避免因字段名变化解析失败导致当天数据缺失
-                            if ("收盘价" in fk) or ("最新价" in fk):
-                                val = row[fk]
-                                break
+                    val = _extract_value(row)
                     val = float(val) if val is not None else None
                 if val is not None:
                     break
@@ -645,6 +669,10 @@ def main():
         for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy", "brent"):
             if fetched.get(k) is not None:
                 tsample[k] = fetched[k]
+        miss = [k for k in ("cny", "eur", "jpy") if fetched.get(k) is None]
+        if miss:
+            print("WARN close 外汇缺失: %s -> 图表二当日汇率未更新，请核查问财返回字段/网络" % ",".join(miss),
+                  file=sys.stderr)
         track = _upsert_track(track, tdate, tsample)
         save_data(track, TRACK)
 
