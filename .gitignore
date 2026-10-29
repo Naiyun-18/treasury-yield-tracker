@@ -1,6 +1,2 @@
-data.json
-close_data.json
-intraday_data.json
 __pycache__/
 *.pyc
-track_daily.json
