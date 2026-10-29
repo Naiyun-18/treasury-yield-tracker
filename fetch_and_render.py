@@ -16,7 +16,7 @@ Data files:
   intraday_data.json   - intraday samples     {ts, us2y, us5y, us10y, us30y}
   track_daily.json     - 图表一每日收盘       {date, gold, us2y, us10y}
 """
-import os, json, re, sys, subprocess, datetime
+import os, json, re, sys, shutil, subprocess, datetime
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 CLOSE = os.path.join(BASE, "close_data.json")
@@ -163,6 +163,12 @@ def load_data(path):
 
 
 def save_data(data, path):
+    # 防数据丢失：保存前先把旧文件滚动备份为 .bak，即使本次覆盖异常也能回退
+    if os.path.exists(path):
+        try:
+            shutil.copy(path, path + ".bak")
+        except Exception:
+            pass
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
     print("saved %d samples -> %s" % (len(data), path))
