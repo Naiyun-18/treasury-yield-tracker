@@ -124,29 +124,64 @@ def fetch_now():
     return out
 
 
-def fetch_brent_series():
-    """布伦特原油连续收盘历史序列 {YYYY-MM-DD: val}（宏观@值[日期] 字段，美元/桶）。
-    走「期货收盘价(连续):布伦特原油:ICE」，仅收盘采样时调用。"""
+def _run_query(q, page=1, limit=20):
+    """调用问财 cli 查询并返回解析后的 JSON（带翻页参数）。"""
     api_key = _api_key()
+    cmd = [sys.executable, CLI, "--query", q, "--timeout", "40",
+           "--page", str(page), "--limit", str(limit)]
+    if api_key:
+        cmd += ["--api-key", api_key]
+    r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ))
+    return json.loads(r.stdout)
+
+
+def fetch_brent_series(days=140):
+    """布伦特原油收盘历史序列 {YYYY-MM-DD: val}（美元/桶）。两步查询：
+    1) 「布伦特原油连续期货收盘价」-> 取有收盘价的最近月活跃合约简称（如 布伦特原油2704）；
+    2) 「{合约简称}从X日到Y日的收盘价」-> 翻页汇总 收盘价[YYYYMMDD] 字段。
+    仅收盘采样时调用。"""
     try:
-        q = "布伦特原油 收盘价 交易日期"
-        cmd = [sys.executable, CLI, "--query", q, "--timeout", "40"]
-        if api_key:
-            cmd += ["--api-key", api_key]
-        r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ))
-        j = json.loads(r.stdout)
-        if j.get("datas"):
-            row = j["datas"][0]
-            out = {}
-            for fk, v in row.items():
-                if fk.startswith("宏观@值[") and v is not None:
-                    raw = fk.replace("宏观@值[", "").replace("]", "")
-                    d = ("%s-%s-%s" % (raw[:4], raw[4:6], raw[6:8])) if len(raw) == 8 else raw
-                    try:
-                        out[d] = float(v)
-                    except Exception:
-                        pass
-            return out
+        j = _run_query("布伦特原油连续期货收盘价", limit=10)
+        best = None
+        for row in j.get("datas") or []:
+            name = row.get("合约简称") or ""
+            m = re.match(r"^布伦特原油(\d{4})$", name)
+            has_px = any(k.startswith("收盘价[") and v is not None
+                         for k, v in row.items() if isinstance(v, (int, float)))
+            if m and has_px:
+                ym = int(m.group(1))
+                if best is None or ym < best[0]:
+                    best = (ym, name)
+        if not best:
+            print("WARN brent: 未找到有收盘价的布伦特活跃合约", file=sys.stderr)
+            return {}
+        name = best[1]
+        end = datetime.date.today()
+        start = end - datetime.timedelta(days=days)
+        q = "%s从%d年%d月%d日到%d年%d月%d日的收盘价" % (
+            name, start.year, start.month, start.day, end.year, end.month, end.day)
+        out = {}
+        page = 1
+        while page <= 15:  # 最多15页防死循环
+            j = _run_query(q, page=page, limit=20)
+            rows = j.get("datas") or []
+            if not rows:
+                break
+            for row in rows:
+                for fk, v in row.items():
+                    if fk.startswith("收盘价[") and v is not None:
+                        raw = fk.replace("收盘价[", "").replace("]", "")
+                        d = ("%s-%s-%s" % (raw[:4], raw[4:6], raw[6:8])) if len(raw) == 8 else raw
+                        try:
+                            out[d] = float(v)
+                        except Exception:
+                            pass
+            if not j.get("has_more"):
+                break
+            page += 1
+        if not out:
+            print("WARN brent: 合约 %s 历史序列为空" % name, file=sys.stderr)
+        return out
     except Exception as e:
         print("ERR brent: %s" % e, file=sys.stderr)
     return {}
