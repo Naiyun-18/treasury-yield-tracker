@@ -17,6 +17,7 @@ Data files:
   track_daily.json     - 图表一每日收盘       {date, gold, us2y, us10y}
 """
 import os, json, re, sys, shutil, subprocess, datetime
+import urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 CLOSE = os.path.join(BASE, "close_data.json")
@@ -36,18 +37,19 @@ QUERIES = {"us2y": "美国2年期国债收益率",
            "jpy": "美元兑日元汇率",
            "gold": "伦敦金现货"}
 KEYS = ["us2y", "us5y", "us10y", "us30y"]
-TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y", "cny", "eur", "jpy", "brent"]
+TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y", "cny", "eur", "jpy", "brent", "dxy"]
 LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "30年期",
           "eu2y": "欧盟2Y", "eu10y": "欧盟10Y",
           "cny": "美元兑人民币(÷6)", "eur": "美元兑欧元", "jpy": "美元兑日元(÷150)",
           "gold": "伦敦金",
-          "brent": "布伦特石油（美元/桶）"}
+          "brent": "布伦特石油（美元/桶）",
+          "dxy": "美元指数"}
 # 表格列名（展示真实值，不标÷除数；除法仅用于图表呈现）
-TAB_LABELS = {"cny": "美元兑人民币", "jpy": "美元兑日元", "brent": "布伦特石油"}
+TAB_LABELS = {"cny": "美元兑人民币", "jpy": "美元兑日元", "brent": "布伦特石油", "dxy": "美元指数"}
 COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b",
           "eu2y": "#2e86c1", "eu10y": "#8e44ad",
           "cny": "#16a085", "eur": "#e91e63", "jpy": "#5d6d7e",
-          "gold": "#d4af37", "brent": "#34495e"}
+          "gold": "#d4af37", "brent": "#34495e", "dxy": "#2c3e50"}
 LINKS = {"us2y": "https://finance.baidu.com/bond/global-US2YT",
          "us5y": "https://finance.baidu.com/bond/global-US5YT",
          "us10y": "https://finance.baidu.com/bond/global-US10YT",
@@ -187,6 +189,30 @@ def fetch_brent_series(days=140):
     return {}
 
 
+def fetch_dxy_series(days=140):
+    """美元指数(DXY)日收盘历史序列 {YYYY-MM-DD: val}，数据源：东方财富 push2his（100.UDI）。
+    问财外汇接口只返最新一天，历史序列走东财。"""
+    out = {}
+    try:
+        url = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=100.UDI"
+               "&fields1=f1,f2,f3,f4,f5&fields2=f51,f53&klt=101&fqt=1&end=20500101&lmt=%d" % days)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            j = json.loads(r.read().decode("utf-8", "replace"))
+        for line in ((j.get("data") or {}).get("klines") or []):
+            parts = line.split(",")
+            if len(parts) >= 2 and parts[1] not in ("-", ""):
+                try:
+                    out[parts[0]] = float(parts[1])
+                except Exception:
+                    pass
+        if not out:
+            print("WARN dxy: 东财返回空", file=sys.stderr)
+    except Exception as e:
+        print("ERR dxy: %s" % e, file=sys.stderr)
+    return out
+
+
 def load_data(path):
     if os.path.exists(path):
         try:
@@ -270,10 +296,11 @@ def _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target):
 
 def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_target, x_when,
                  left_axis_title="伦敦金（美元/盎司）", right_axis_title="债券收益率（%）",
-                 ylab_fmt="%.2f%%", bottom_key=None, bottom_title="布伦特石油主力（美元/桶）"):
-    """双轴折线图（上下双面板，共享同一X轴）：
-      上图 = left_key(左轴·金价) + right_keys(右轴)；
-      下图(可选) = bottom_key 单线，独立左轴刻度(真实值)，与上图共享X轴。
+                 ylab_fmt="%.2f%%", bottom_key=None, bottom_title="布伦特石油主力（美元/桶）",
+                 bottom2_key=None, bottom2_title="美元指数"):
+    """多面板折线图（主图 + 1~2 个附面板，全部共享同一X轴）：
+      主图 = left_key(左轴) + right_keys(右轴)；
+      附面板(可选) = bottom_key / bottom2_key 单线，各独立左轴刻度(真实值)。
     points=[{date, ...},...]；divisors=None 或 {key: 除数}。用于图表一(金价+Yield)与图表二(金价+汇率)。"""
     def dv(k):
         return divisors.get(k, 1.0) if divisors else 1.0
@@ -284,18 +311,37 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
 
     W, L, R = 1200, 88, 80
     iw = W - L - R
-    top_y, top_h, bot_y, bot_h = 45, 275, 358, 178
-    bot_end = bot_y + bot_h
+
+    # 附面板列表 [key, title, lo, hi, y, h]
+    subs = []
+    for _k, _t in ((bottom_key, bottom_title), (bottom2_key, bottom2_title)):
+        if not _k:
+            continue
+        _v = [p[_k] for p in points if p.get(_k) is not None]
+        _lo, _hi = _axis(min(_v), max(_v)) if _v else (0.0, 100.0)
+        subs.append([_k, _t, _lo, _hi, 0, 0])
+
+    top_y = 45
+    if not subs:
+        top_h = 275
+        bot_end = top_y + top_h
+    else:
+        top_h = 250 if len(subs) == 1 else 230
+        _y = top_y + top_h
+        _h = 165 if len(subs) == 1 else 150
+        for s in subs:
+            _y += 46
+            s[4], s[5] = _y, _h
+            _y += _h
+        bot_end = subs[-1][4] + subs[-1][5]
     H = bot_end + 52
     xlbl_y = bot_end + 24
 
     b_lo = b_hi = None
-    if bottom_key:
-        bvals = [p[bottom_key] for p in points if p.get(bottom_key) is not None]
-        if bvals:
-            b_lo, b_hi = _axis(min(bvals), max(bvals))
-        else:
-            b_lo, b_hi = (95.0, 110.0)
+    bot_y = bot_h = 0
+    if subs:
+        b_lo, b_hi = subs[0][2], subs[0][3]
+        bot_y, bot_h = subs[0][4], subs[0][5]
 
     parts = ['<line x1="0" y1="0" x2="%d" y2="0" stroke="#f5f7fa" stroke-width="0"/>' % W]
     # 垂直网格线跨上下两面板（共享X轴）
@@ -324,18 +370,20 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
     ])
     parts.append(ax)
 
-    # 下图横向网格 + 布伦特左轴
+    # 附面板横向网格 + 各自左轴
     bot = []
-    if bottom_key and b_lo is not None:
+    for _k, _t, _lo, _hi, _yy, _hh in subs:
+        _dec = 1 if (_hi - _lo) < 12 else 0
         for g in range(5):
-            blab = b_lo + (b_hi - b_lo) * g / 4
-            by = _py(blab, b_lo, b_hi, bot_y, bot_h)
+            blab = _lo + (_hi - _lo) * g / 4
+            by = _py(blab, _lo, _hi, _yy, _hh)
             bot.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#ececec"/>' % (L, by, W - R, by))
-            bot.append('<text x="%d" y="%.1f" class="ylab" text-anchor="end">%.0f</text>' % (L - 8, by + 4, blab))
+            bot.append('<text x="%d" y="%.1f" class="ylab" text-anchor="end">%.*f</text>'
+                       % (L - 8, by + 4, _dec, blab))
         bot.append('<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="#9db3c9" stroke-width="1.5"/>'
-                   % (L, bot_y - 20, W - R, bot_y - 20))
+                   % (L, _yy - 20, W - R, _yy - 20))
         bot.append('<text x="%d" y="%d" class="ylab" text-anchor="middle" font-weight="600">%s</text>'
-                   % (L + iw // 2, bot_y - 26, bottom_title))
+                   % (L + iw // 2, _yy - 26, _t))
     parts.append("".join(bot))
 
     # X轴标签（最底部，上下两图共享）
@@ -367,16 +415,16 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
                              % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[k]))
             x, y = pts[-1]
             dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[k]))
-    if bottom_key and b_lo is not None:
-        pts = series_pts(bottom_key, b_lo, b_hi, bot_y, bot_h)
+    for _k, _t, _lo, _hi, _yy, _hh in subs:
+        pts = series_pts(_k, _lo, _hi, _yy, _hh)
         if pts:
             polylines.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="2.5"/>'
-                             % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[bottom_key]))
+                             % (" ".join("%.1f,%.1f" % (x, y) for x, y in pts), COLORS[_k]))
             x, y = pts[-1]
-            dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[bottom_key]))
+            dots.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s"/>' % (x, y, COLORS[_k]))
     parts.append("".join(polylines) + "".join(dots))
 
-    legend_keys = [left_key] + right_keys + ([bottom_key] if bottom_key else [])
+    legend_keys = [left_key] + right_keys + [s[0] for s in subs]
     legend = ('<div class="legendbox">%s</div>' % "".join(
         '<span class="legend-dot" style="background:%s"></span><span class="legend-name">%s</span>'
         % (COLORS[k], LABELS[k]) for k in legend_keys))
@@ -749,7 +797,7 @@ def render(close_pts, intra_pts, track_pts, analysis_html=None):
 
     head = ("<h1>国债和黄金石油价格跟踪报告</h1>"
             "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金 ＋ 布伦特石油 ＋ 主要汇率<br>"
-            "图表一：伦敦金+美/欧 2Y/10Y（每图下方附图含布伦特石油）<b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
+            "图表一：伦敦金+美/欧 2Y/10Y（下方附图：布伦特石油＋美元指数）<b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
             "图表二：伦敦金+主要汇率（每图下方附图含布伦特石油）<b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
             "图表三：美债每日收盘 &nbsp;·&nbsp; "
             "图表四：盘中每3小时（北京 23:00/02:00/05:00）</div>")
@@ -785,9 +833,9 @@ def render(close_pts, intra_pts, track_pts, analysis_html=None):
     charts = "".join(filter(None, [
         render_dual(tpts, "gold", ["us2y", "us10y", "eu2y", "eu10y"], None,
                     "图表一 · 伦敦金与美/欧国债短长端每日收盘价",
-                    "上图：伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) &nbsp;下图：布伦特石油主力(美元/桶,独立刻度) &nbsp;·&nbsp; 上下两图共享同一X轴（90 个交易日采样，每日更新）",
+                    "上图：伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) &nbsp;下图1：布伦特石油主力(美元/桶) &nbsp;下图2：美元指数(DXY，独立刻度) &nbsp;·&nbsp; 三图共享同一X轴（90 个交易日采样，每日更新）",
                     90, _when_date, "伦敦金（美元/盎司）", "债券收益率（%）", "%.2f%%",
-                    bottom_key="brent") if tpts else None,
+                    bottom_key="brent", bottom2_key="dxy") if tpts else None,
         render_dual(tpts, "gold", ["cny", "eur", "jpy"], {"jpy": 150, "cny": 6},
                     "图表二 · 主要汇率走向与伦敦金每日收盘价",
                     "上图：伦敦金(左轴·美元/盎司) + 美元兑人民币(÷6)/美元兑欧元/美元兑日元(÷150)(右轴) &nbsp;下图：布伦特石油主力(美元/桶,独立刻度) &nbsp;·&nbsp; 上下两图共享同一X轴（90 个交易日采样，每工作日更新）",
@@ -860,6 +908,24 @@ def main():
     else:
         print("WARN brent 未抓到收盘价（数据源可能尚未入库，后续采集点将自动回填）", file=sys.stderr)
 
+    # 美元指数：东财日K序列，每次运行都抓并回填历史缺口
+    dxy_full = fetch_dxy_series()
+    if dxy_full:
+        _tr = load_data(TRACK)
+        _filled = 0
+        for s in _tr:
+            _d = s.get("date")
+            if _d and _d in dxy_full and s.get("dxy") is None:
+                s["dxy"] = dxy_full[_d]
+                _filled += 1
+        if _filled:
+            save_data(_tr, TRACK)
+            print("dxy 回填 %d 条" % _filled)
+        if today_str() in dxy_full:
+            fetched["dxy"] = dxy_full[today_str()]
+    else:
+        print("WARN dxy 未抓到收盘价", file=sys.stderr)
+
     if kind == "close":
         # 收盘：美债写 close_data（图表二）；同时伦敦金+2Y+10Y 写 track_daily（图表一每日更新）
         close = load_data(CLOSE)
@@ -876,7 +942,7 @@ def main():
         track = load_data(TRACK)
         tdate = today_str()
         tsample = {"date": tdate}
-        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy", "brent"):
+        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy", "brent", "dxy"):
             if fetched.get(k) is not None:
                 tsample[k] = fetched[k]
         miss = [k for k in ("cny", "eur", "jpy") if fetched.get(k) is None]
