@@ -581,8 +581,166 @@ ANALYSIS = """<div class="analysis"><div class="analysis-title">📊 市场解�
 <p><b>⚠️ 关注点：</b>金价与实际利率、美元方向高度相关——若短端转强(全面走强、实际利率上行)→黄金承压；若长端上行源于财政/通胀担忧(实际利率未升)→黄金偏多支撑。</p>
 </div></div>"""
 
+ANALYSIS_CACHE = os.path.join(BASE, "analysis_cache.json")
 
-def render(close_pts, intra_pts, track_pts):
+
+def _fmtpct(v, n=3):
+    return ("%.*f%%" % (n, v)) if v is not None else "—"
+
+
+def _delta(a, b, unit="", n=2):
+    """返回 (差值文本, 方向符号)；a=最新 b=前值。"""
+    if a is None or b is None:
+        return "", "→"
+    d = a - b
+    if abs(d) < 1e-9:
+        return "持平", "→"
+    sign = "+" if d > 0 else ""
+    arrow = "↑" if d > 0 else "↓"
+    return ("%s%.*f%s" % (sign, n, d, unit)), arrow
+
+
+def build_analysis(track, close):
+    """基于最新数据自动生成「市场解读」HTML（仅收盘采样时生成，每日一次）。"""
+    if not track:
+        return ANALYSIS
+    latest = track[-1]
+    prev = track[-2] if len(track) > 1 else {}
+    d = latest.get("date", "")
+    cl = close[-1] if close else {}
+    cp = close[-2] if len(close) > 1 else {}
+
+    # —— 伦敦金 ——
+    gold = latest.get("gold")
+    gtxt, garrow = _delta(gold, prev.get("gold"), "")
+    gold_line = "<p><b>🥇 伦敦金：</b>最新收盘 <b>%s 美元/盎司</b>（%s）" % (
+        ("%.2f" % gold) if gold is not None else "—", d)
+    if gtxt:
+        _gp = prev.get("gold")
+        _pct = ((gold - _gp) / _gp * 100.0) if (_gp and gold is not None) else None
+        gold_line += "，较前一交易日 <b>%s</b>%s" % (
+            gtxt, ("（%+.2f%%）" % _pct) if _pct is not None else "")
+    gold_line += "。</p>"
+
+    # —— 布伦特石油（取最近一个有值的记录） ——
+    b_now = latest.get("brent")
+    b_prev = None
+    for s in reversed(track[:-1]):
+        if s.get("brent") is not None:
+            b_prev = s.get("brent")
+            break
+    oil_line = ""
+    if b_now is not None:
+        btxt, _ = _delta(b_now, b_prev, "")
+        oil_line = "<p><b>🛢️ 布伦特石油：</b>最新收盘 <b>%.2f 美元/桶</b>%s。</p>" % (
+            b_now, ("，较前值 " + btxt) if btxt else "")
+    else:
+        _last_b, _last_bd = None, None
+        for s in reversed(track):
+            if s.get("brent") is not None:
+                _last_b, _last_bd = s.get("brent"), s.get("date")
+                break
+        if _last_b is not None:
+            oil_line = ("<p><b>🛢️ 布伦特石油：</b>最新可得收盘 <b>%.2f 美元/桶</b>（%s），"
+                        "当日价待次日凌晨入库后自动回填。</p>") % (_last_b, _last_bd)
+        else:
+            oil_line = "<p><b>🛢️ 布伦特石油：</b>本日收盘价尚未入库（数据源延迟），将在后续采集点自动回填。</p>"
+
+    # —— 美债期限结构 + 形态判别 ——
+    u2, u5, u10, u30 = cl.get("us2y"), cl.get("us5y"), cl.get("us10y"), cl.get("us30y")
+    d2 = (u2 - cp.get("us2y")) if (u2 is not None and cp.get("us2y") is not None) else None
+    d5 = (u5 - cp.get("us5y")) if (u5 is not None and cp.get("us5y") is not None) else None
+    d10 = (u10 - cp.get("us10y")) if (u10 is not None and cp.get("us10y") is not None) else None
+    d30 = (u30 - cp.get("us30y")) if (u30 is not None and cp.get("us30y") is not None) else None
+
+    # 形态判别：短端(2Y) vs 长端(10Y/30Y) 变化方向与幅度
+    shape, shape_desc, driver, stock_view, gold_view = "窄幅震荡", "各期限变动幅度有限", \
+        "多空因素交织，缺乏明确方向性驱动", "风格轮动暂缓，维持现有结构", "短线跟随美元与实际利率波动"
+    if None not in (d2, d10):
+        long_up = (d10 > 0.005) and (d30 is None or d30 > -0.005)
+        long_dn = (d10 < -0.005) and (d30 is None or d30 < 0.005)
+        short_up = d2 > 0.005
+        short_dn = d2 < -0.005
+        if long_up and abs(d2) <= 0.02 and d10 > 0.02:
+            shape, shape_desc = "熊陡(bear steepening)", "短端平稳、长端独自走强"
+            driver = "期限溢价抬升（财政赤字/长期通胀担忧），而非加息预期驱动"
+            stock_view = "结构性压高估值成长，资金偏向价值/红利/银行"
+            gold_view = "长端上行若源于财政/通胀担忧（实际利率未同步抬升）→ 黄金偏多支撑"
+        elif short_up and long_up and d2 > d10:
+            shape, shape_desc = "熊平(bear flattening)", "短端上行快于长端"
+            driver = "加息/紧缩预期升温，短端对政策最敏感"
+            stock_view = "全面压估值，流动性收紧，双杀风险更大"
+            gold_view = "实际利率抬升 → 黄金承压"
+        elif short_up and long_up:
+            shape, shape_desc = "平行上移", "整条曲线同步上行"
+            driver = "货币政策收紧与流动性收缩预期"
+            stock_view = "系统性压估值，成长股承压更明显"
+            gold_view = "实际利率走高 → 黄金承压"
+        elif short_dn and long_dn:
+            shape, shape_desc = "整体下移", "整条曲线同步回落"
+            driver = "降息预期升温或避险买盘推动债市走强"
+            stock_view = "估值压力缓解，成长风格相对受益"
+            gold_view = "实际利率回落 → 黄金偏多"
+        elif short_dn and long_up:
+            shape, shape_desc = "牛陡(bull steepening)", "短端下行、长端上行"
+            driver = "短端定价宽松、长端担忧财政，曲线两端分化"
+            stock_view = "风格分化加剧，长久期成长与价值各有压力"
+            gold_view = "长端财政担忧占优时，黄金偏多"
+
+    def _d(v):
+        return "—" if v is None else ("%+.0fbp" % (v * 100))
+    term_line = ("<p><b>📌 美债期限结构：</b>2Y <b>%s</b>%s / 5Y %s%s / 10Y <b>%s</b>%s / 30Y %s%s，"
+                 "呈<b>%s</b>形态——%s。</p>") % (
+        _fmtpct(u2), ("(" + _d(d2) + ")") if d2 is not None else "",
+        _fmtpct(u5), ("(" + _d(d5) + ")") if d5 is not None else "",
+        _fmtpct(u10), ("(" + _d(d10) + ")") if d10 is not None else "",
+        _fmtpct(u30), ("(" + _d(d30) + ")") if d30 is not None else "",
+        shape, shape_desc)
+
+    # —— 联动观察 ——
+    link = ""
+    if gold is not None and prev.get("gold") is not None and d10 is not None:
+        g_up = gold > prev.get("gold")
+        if g_up and d10 > 0.005:
+            link = "<p><b>🔗 联动观察：</b>金价与长端收益率同步上行——若由通胀/财政担忧主导，两者可同向；若实际利率抬升，则金价后续承压。</p>"
+        elif (not g_up) and d10 > 0.005:
+            link = "<p><b>🔗 联动观察：</b>金价回落而长端收益率上行，符合「利率上行压制金价」的负相关逻辑。</p>"
+        elif g_up and d10 < -0.005:
+            link = "<p><b>🔗 联动观察：</b>金价上行与收益率回落同向，指向避险情绪升温、宽松预期回暖。</p>"
+        else:
+            link = "<p><b>🔗 联动观察：</b>金价与收益率方向一致向下，债市偏强、风险偏好边际回落。</p>"
+
+    html = ("<div class=\"analysis\"><div class=\"analysis-title\">📊 市场解读</div>\n"
+            "<div class=\"analysis-body\">\n%s\n%s\n%s\n"
+            "<p><b>🔍 驱动因素：</b>%s。</p>\n"
+            "%s\n"
+            "<p><b>📈 对股市：</b>%s。</p>\n"
+            "<p><b>⚠️ 对黄金：</b>%s。</p>\n"
+            "<p><b>💧 对流动性：</b>高长端利率→全球资金增配美元资产、融资成本上升、美元偏强、新兴市场承压。</p>\n"
+            "</div></div>") % (gold_line, oil_line, term_line, driver, link, stock_view, gold_view)
+    return html
+
+
+def load_analysis_cache():
+    """读取缓存的每日市场解读（仅 06:00 收盘采样时刷新）。"""
+    try:
+        j = json.load(open(ANALYSIS_CACHE, encoding="utf-8"))
+        if j.get("html"):
+            return j["html"]
+    except Exception:
+        pass
+    return ANALYSIS
+
+
+def save_analysis_cache(html):
+    try:
+        json.dump({"date": today_str(), "html": html}, open(ANALYSIS_CACHE, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1)
+    except Exception as e:
+        print("WARN analysis cache save: %s" % e, file=sys.stderr)
+
+
+def render(close_pts, intra_pts, track_pts, analysis_html=None):
     cpts = close_pts[-60:]
     ipts = intra_pts[-60:]
     tpts = track_pts[-90:]
@@ -641,7 +799,7 @@ def render(close_pts, intra_pts, track_pts):
                      "交易日（北京 23:00 / 02:00 / 05:00）· 横坐标 60 个采样点（约 20 个交易日）", 60, _when_intra) if ipts else None,
     ]))
 
-    body = ANALYSIS + rate_cards_html + charts
+    body = (analysis_html or ANALYSIS) + rate_cards_html + charts
 
     return ("<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -673,7 +831,7 @@ def main():
         print("当前时刻非美债盘中/收盘采集点（休市或开盘不采集），跳过抓取，仅渲染页面")
         close = load_data(CLOSE); intra = load_data(INTRADAY); track = load_data(TRACK)
         with open(HTML, "w", encoding="utf-8") as f:
-            f.write(render(close, intra, track))
+            f.write(render(close, intra, track, load_analysis_cache()))
         print("rendered(existing) -> %s | close=%d intraday=%d track=%d"
               % (HTML, len(close), len(intra), len(track)))
         return
@@ -682,6 +840,25 @@ def main():
     if not any(v is not None for v in fetched.values()):
         print("抓取失败，无有效数据，跳过")
         return
+
+    # 布伦特石油：每次运行都尝试抓取并回填历史缺口
+    # （问财收盘价入库滞后于北京 06:00 采集点，靠后续采集点自动补当日值）
+    brent_full = fetch_brent_series()
+    if brent_full:
+        _tr = load_data(TRACK)
+        _filled = 0
+        for s in _tr:
+            _d = s.get("date")
+            if _d and _d in brent_full and s.get("brent") is None:
+                s["brent"] = brent_full[_d]
+                _filled += 1
+        if _filled:
+            save_data(_tr, TRACK)
+            print("brent 回填 %d 条" % _filled)
+        if today_str() in brent_full:
+            fetched["brent"] = brent_full[today_str()]
+    else:
+        print("WARN brent 未抓到收盘价（数据源可能尚未入库，后续采集点将自动回填）", file=sys.stderr)
 
     if kind == "close":
         # 收盘：美债写 close_data（图表二）；同时伦敦金+2Y+10Y 写 track_daily（图表一每日更新）
@@ -698,14 +875,6 @@ def main():
 
         track = load_data(TRACK)
         tdate = today_str()
-        # 布伦特石油：额外抓取连续主力收盘序列(宏观@值[日期])，取最新已知值并回填历史
-        brent_full = fetch_brent_series()
-        if brent_full:
-            fetched["brent"] = brent_full[max(brent_full)]
-            for s in track:
-                d = s.get("date")
-                if d and d in brent_full and s.get("brent") is None:
-                    s["brent"] = brent_full[d]
         tsample = {"date": tdate}
         for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy", "brent"):
             if fetched.get(k) is not None:
@@ -716,6 +885,12 @@ def main():
                   file=sys.stderr)
         track = _upsert_track(track, tdate, tsample)
         save_data(track, TRACK)
+        # 市场解读：仅收盘采样（每日 06:00）时重新生成并缓存
+        try:
+            save_analysis_cache(build_analysis(track, close))
+            print("analysis cache updated for %s" % tdate)
+        except Exception as e:
+            print("WARN analysis build: %s" % e, file=sys.stderr)
 
     else:  # intraday
         intra = load_data(INTRADAY)
@@ -731,7 +906,7 @@ def main():
 
     close = load_data(CLOSE); intra = load_data(INTRADAY); track = load_data(TRACK)
     with open(HTML, "w", encoding="utf-8") as f:
-        f.write(render(close, intra, track))
+        f.write(render(close, intra, track, load_analysis_cache()))
     print("rendered -> %s | close=%d intraday=%d track=%d | kind=%s latest gold=%.2f 2Y=%.3f 10Y=%.3f"
           % (HTML, len(close), len(intra), len(track), kind,
              fetched.get("gold", 0) or 0, fetched.get("us2y", 0) or 0, fetched.get("us10y", 0) or 0))
