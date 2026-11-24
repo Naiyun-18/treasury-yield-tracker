@@ -16,7 +16,7 @@ Data files:
   intraday_data.json   - intraday samples     {ts, us2y, us5y, us10y, us30y}
   track_daily.json     - 图表一每日收盘       {date, gold, us2y, us10y}
 """
-import os, json, re, sys, shutil, subprocess, datetime
+import os, json, re, sys, shutil, subprocess, datetime, time
 import urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -37,19 +37,21 @@ QUERIES = {"us2y": "美国2年期国债收益率",
            "jpy": "美元兑日元汇率",
            "gold": "伦敦金现货"}
 KEYS = ["us2y", "us5y", "us10y", "us30y"]
-TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y", "cny", "eur", "jpy", "brent", "dxy"]
+TRACKKEYS = ["gold", "us2y", "us10y", "eu2y", "eu10y", "cny", "eur", "jpy", "brent", "dxy", "copper"]
 LABELS = {"us2y": "2年期", "us5y": "5年期", "us10y": "10年期", "us30y": "30年期",
           "eu2y": "欧盟2Y", "eu10y": "欧盟10Y",
           "cny": "美元兑人民币(÷6)", "eur": "美元兑欧元", "jpy": "美元兑日元(÷150)",
           "gold": "伦敦金",
           "brent": "布伦特石油（美元/桶）",
-          "dxy": "美元指数"}
+          "dxy": "美元指数",
+          "copper": "现货铜（元/吨）"}
 # 表格列名（展示真实值，不标÷除数；除法仅用于图表呈现）
-TAB_LABELS = {"cny": "美元兑人民币", "jpy": "美元兑日元", "brent": "布伦特石油", "dxy": "美元指数"}
+TAB_LABELS = {"cny": "美元兑人民币", "jpy": "美元兑日元", "brent": "布伦特石油", "dxy": "美元指数",
+              "copper": "现货铜"}
 COLORS = {"us2y": "#27ae60", "us5y": "#2471a3", "us10y": "#e67e22", "us30y": "#c0392b",
           "eu2y": "#2e86c1", "eu10y": "#8e44ad",
           "cny": "#16a085", "eur": "#e91e63", "jpy": "#5d6d7e",
-          "gold": "#d4af37", "brent": "#34495e", "dxy": "#2c3e50"}
+          "gold": "#d4af37", "brent": "#34495e", "dxy": "#2c3e50", "copper": "#b87333"}
 LINKS = {"us2y": "https://finance.baidu.com/bond/global-US2YT",
          "us5y": "https://finance.baidu.com/bond/global-US5YT",
          "us10y": "https://finance.baidu.com/bond/global-US10YT",
@@ -193,23 +195,74 @@ def fetch_dxy_series(days=140):
     """美元指数(DXY)日收盘历史序列 {YYYY-MM-DD: val}，数据源：东方财富 push2his（100.UDI）。
     问财外汇接口只返最新一天，历史序列走东财。"""
     out = {}
+    for _attempt in range(2):
+        try:
+            url = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=100.UDI"
+                   "&fields1=f1,f2,f3,f4,f5&fields2=f51,f53&klt=101&fqt=1&end=20500101&lmt=%d" % days)
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                j = json.loads(r.read().decode("utf-8", "replace"))
+            for line in ((j.get("data") or {}).get("klines") or []):
+                parts = line.split(",")
+                if len(parts) >= 2 and parts[1] not in ("-", ""):
+                    try:
+                        out[parts[0]] = float(parts[1])
+                    except Exception:
+                        pass
+            if out:
+                break
+            print("WARN dxy: 东财返回空(第%d次)" % (_attempt + 1), file=sys.stderr)
+        except Exception as e:
+            print("ERR dxy(第%d次): %s" % (_attempt + 1, e), file=sys.stderr)
+            if _attempt < 1:
+                time.sleep(2)
+    return out
+
+
+def fetch_dxy_latest():
+    """问财兜底：返回 (YYYY-MM-DD, 值) 美元指数最新收盘。东财历史接口不可用时至少保当日值。"""
     try:
-        url = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=100.UDI"
-               "&fields1=f1,f2,f3,f4,f5&fields2=f51,f53&klt=101&fqt=1&end=20500101&lmt=%d" % days)
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=25) as r:
-            j = json.loads(r.read().decode("utf-8", "replace"))
-        for line in ((j.get("data") or {}).get("klines") or []):
-            parts = line.split(",")
-            if len(parts) >= 2 and parts[1] not in ("-", ""):
-                try:
-                    out[parts[0]] = float(parts[1])
-                except Exception:
-                    pass
-        if not out:
-            print("WARN dxy: 东财返回空", file=sys.stderr)
+        j = _run_query("美元指数收盘价", limit=2)
+        for row in j.get("datas") or []:
+            for k, v in row.items():
+                if k.startswith("外汇@收盘价[") and v is not None:
+                    raw = k.split("[")[1].rstrip("]")
+                    if len(raw) == 8:
+                        return ("%s-%s-%s" % (raw[:4], raw[4:6], raw[6:8]), float(v))
     except Exception as e:
-        print("ERR dxy: %s" % e, file=sys.stderr)
+        print("ERR dxy latest: %s" % e, file=sys.stderr)
+    return None
+
+
+def fetch_copper_series(days=140):
+    """现货铜（国内现货价，元/吨）日序列 {YYYY-MM-DD: val}，问财宏观指标（macro_name=现货价:铜）。"""
+    out = {}
+    try:
+        end = datetime.date.today()
+        start = end - datetime.timedelta(days=days)
+        q = "现货铜价格从%d年%d月%d日到%d年%d月%d日" % (
+            start.year, start.month, start.day, end.year, end.month, end.day)
+        page = 1
+        while page <= 5:
+            j = _run_query(q, page=page, limit=100)
+            rows = j.get("datas") or []
+            if not rows:
+                break
+            for row in rows:
+                raw = str(row.get("时间") or "")
+                v = row.get("指标值")
+                if len(raw) == 8 and v is not None:
+                    try:
+                        out["%s-%s-%s" % (raw[:4], raw[4:6], raw[6:8])] = float(v)
+                    except Exception:
+                        pass
+            if not j.get("has_more"):
+                break
+            page += 1
+        if not out:
+            print("WARN copper: 现货铜序列为空", file=sys.stderr)
+    except Exception as e:
+        print("ERR copper: %s" % e, file=sys.stderr)
     return out
 
 
@@ -297,7 +350,8 @@ def _scale_pts(points, key, ylo, yhi, L, iw, T, ih, n_target):
 def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_target, x_when,
                  left_axis_title="伦敦金（美元/盎司）", right_axis_title="债券收益率（%）",
                  ylab_fmt="%.2f%%", bottom_key=None, bottom_title="布伦特石油主力（美元/桶）",
-                 bottom2_key=None, bottom2_title="美元指数"):
+                 bottom2_key=None, bottom2_title="美元指数",
+                 bottom3_key=None, bottom3_title="现货铜（元/吨）"):
     """多面板折线图（主图 + 1~2 个附面板，全部共享同一X轴）：
       主图 = left_key(左轴) + right_keys(右轴)；
       附面板(可选) = bottom_key / bottom2_key 单线，各独立左轴刻度(真实值)。
@@ -314,7 +368,8 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
 
     # 附面板列表 [key, title, lo, hi, y, h]
     subs = []
-    for _k, _t in ((bottom_key, bottom_title), (bottom2_key, bottom2_title)):
+    for _k, _t in ((bottom_key, bottom_title), (bottom2_key, bottom2_title),
+                   (bottom3_key, bottom3_title)):
         if not _k:
             continue
         _v = [p[_k] for p in points if p.get(_k) is not None]
@@ -326,11 +381,13 @@ def render_dual(points, left_key, right_keys, divisors, title, subtitle, n_targe
         top_h = 275
         bot_end = top_y + top_h
     else:
-        top_h = 250 if len(subs) == 1 else 230
+        _n = len(subs)
+        top_h = {1: 250, 2: 230}.get(_n, 205)
+        _h = {1: 165, 2: 150}.get(_n, 125)
+        _gap = 46 if _n <= 2 else 40
         _y = top_y + top_h
-        _h = 165 if len(subs) == 1 else 150
         for s in subs:
-            _y += 46
+            _y += _gap
             s[4], s[5] = _y, _h
             _y += _h
         bot_end = subs[-1][4] + subs[-1][5]
@@ -797,7 +854,7 @@ def render(close_pts, intra_pts, track_pts, analysis_html=None):
 
     head = ("<h1>国债和黄金石油价格跟踪报告</h1>"
             "<div class='sub'>美债 2Y / 5Y / 10Y / 30Y ＋ 欧盟 2Y / 10Y ＋ 伦敦金 ＋ 布伦特石油 ＋ 主要汇率<br>"
-            "图表一：伦敦金+美/欧 2Y/10Y（下方附图：布伦特石油＋美元指数）<b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
+            "图表一：伦敦金+美/欧 2Y/10Y（下方附图：布伦特石油＋美元指数＋现货铜）<b>（90采样点，每日更新）</b> &nbsp;·&nbsp; "
             "图表二：伦敦金+主要汇率（每图下方附图含布伦特石油）<b>（90采样点，每工作日更新）</b> &nbsp;·&nbsp; "
             "图表三：美债每日收盘 &nbsp;·&nbsp; "
             "图表四：盘中每3小时（北京 23:00/02:00/05:00）</div>")
@@ -833,9 +890,9 @@ def render(close_pts, intra_pts, track_pts, analysis_html=None):
     charts = "".join(filter(None, [
         render_dual(tpts, "gold", ["us2y", "us10y", "eu2y", "eu10y"], None,
                     "图表一 · 伦敦金与美/欧国债短长端每日收盘价",
-                    "上图：伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) &nbsp;下图1：布伦特石油主力(美元/桶) &nbsp;下图2：美元指数(DXY，独立刻度) &nbsp;·&nbsp; 三图共享同一X轴（90 个交易日采样，每日更新）",
+                    "上图：伦敦金(左轴·美元/盎司) + 美/欧 2Y / 10Y(右轴·%) &nbsp;下图1：布伦特石油主力(美元/桶) &nbsp;下图2：美元指数(DXY) &nbsp;下图3：现货铜(元/吨) &nbsp;·&nbsp; 四图共享同一X轴（90 个交易日采样，每日更新）",
                     90, _when_date, "伦敦金（美元/盎司）", "债券收益率（%）", "%.2f%%",
-                    bottom_key="brent", bottom2_key="dxy") if tpts else None,
+                    bottom_key="brent", bottom2_key="dxy", bottom3_key="copper") if tpts else None,
         render_dual(tpts, "gold", ["cny", "eur", "jpy"], {"jpy": 150, "cny": 6},
                     "图表二 · 主要汇率走向与伦敦金每日收盘价",
                     "上图：伦敦金(左轴·美元/盎司) + 美元兑人民币(÷6)/美元兑欧元/美元兑日元(÷150)(右轴) &nbsp;下图：布伦特石油主力(美元/桶,独立刻度) &nbsp;·&nbsp; 上下两图共享同一X轴（90 个交易日采样，每工作日更新）",
@@ -908,8 +965,13 @@ def main():
     else:
         print("WARN brent 未抓到收盘价（数据源可能尚未入库，后续采集点将自动回填）", file=sys.stderr)
 
-    # 美元指数：东财日K序列，每次运行都抓并回填历史缺口
+    # 美元指数：东财日K序列为主，失败则用问财单点兜底
     dxy_full = fetch_dxy_series()
+    if not dxy_full:
+        _dl = fetch_dxy_latest()
+        if _dl:
+            dxy_full = {_dl[0]: _dl[1]}
+            print("dxy 东财不可用，改用问财单点: %s=%s" % _dl)
     if dxy_full:
         _tr = load_data(TRACK)
         _filled = 0
@@ -925,6 +987,24 @@ def main():
             fetched["dxy"] = dxy_full[today_str()]
     else:
         print("WARN dxy 未抓到收盘价", file=sys.stderr)
+
+    # 现货铜：问财宏观指标序列，每次运行都抓并回填历史缺口
+    copper_full = fetch_copper_series()
+    if copper_full:
+        _tr = load_data(TRACK)
+        _filled = 0
+        for s in _tr:
+            _d = s.get("date")
+            if _d and _d in copper_full and s.get("copper") is None:
+                s["copper"] = copper_full[_d]
+                _filled += 1
+        if _filled:
+            save_data(_tr, TRACK)
+            print("copper 回填 %d 条" % _filled)
+        if today_str() in copper_full:
+            fetched["copper"] = copper_full[today_str()]
+    else:
+        print("WARN copper 未抓到现货铜价", file=sys.stderr)
 
     if kind == "close":
         # 收盘：美债写 close_data（图表二）；同时伦敦金+2Y+10Y 写 track_daily（图表一每日更新）
@@ -942,7 +1022,8 @@ def main():
         track = load_data(TRACK)
         tdate = today_str()
         tsample = {"date": tdate}
-        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy", "brent", "dxy"):
+        for k in ("gold", "eu2y", "eu10y", "us2y", "us10y", "cny", "eur", "jpy", "brent", "dxy",
+                  "copper"):
             if fetched.get(k) is not None:
                 tsample[k] = fetched[k]
         miss = [k for k in ("cny", "eur", "jpy") if fetched.get(k) is None]
